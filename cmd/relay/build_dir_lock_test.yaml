@@ -1,0 +1,36 @@
+---
+package: main
+description: ''
+tags:
+- test
+category: []
+used_in: []
+entrypoint: true
+related_nodes: []
+objects:
+- name: TestLockBuildDir_SerializesRunsOnOneDir
+  kind: func
+  description: ''
+  references:
+  - assert.Equal
+  calls:
+  - assert.Equal
+- name: TestLockBuildDir_DifferentDirsDoNotBlock
+  kind: func
+  description: ''
+  references: []
+  calls: []
+- name: TestLockBuildDir_EmptyDirTakesNoLock
+  kind: func
+  description: ''
+  references: []
+  calls: []
+- name: TestPipelineOverridesAllowed
+  kind: func
+  description: ''
+  references:
+  - assert.True
+  - assert.False
+  calls:
+  - assert.False
+  - assert.True

@@ -140,7 +140,7 @@ func TestStart_CommitTakesFullCloneAndChecksOut(t *testing.T) {
 		"schema":   "pg", "version": "v1.0.0",
 	})
 	joined := strings.Join(mr.seen, "\n")
-	require.Contains(t, joined, "git clone https://git.example.com/schemas.git")
+	require.Contains(t, joined, "git clone -- https://git.example.com/schemas.git", "-- keeps the URL from being read as an option")
 	require.NotContains(t, joined, "--depth 1")
 	require.Contains(t, joined, "git checkout --detach 0123456789abcdef0123456789abcdef01234567")
 }

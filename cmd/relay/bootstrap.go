@@ -172,9 +172,12 @@ func registerNativeComponents(ctx context.Context, svc cabinet.Cabinet, pkiAsset
 	}
 
 	// --- Register schema pipeline modules ---
+	// The build directory (deleted by every run) and the builder container (reached through the
+	// Docker socket) are the operator's: requests may not redirect them.
 	pipelineCfg := &schemapipeline.PipelineConfig{
-		BuildDir:         cfg.SchemaBuildDir,
-		BuilderContainer: cfg.SchemaBuilderContainer,
+		BuildDir:          cfg.SchemaBuildDir,
+		BuilderContainer:  cfg.SchemaBuilderContainer,
+		RestrictOverrides: !pipelineOverridesAllowed(pkiAssets.TrustMode),
 	}
 
 	pipelineSteps := []struct {
@@ -759,4 +762,14 @@ func loadPKIAssets(fsys fs.FS, path string, logger *logrus.Logger) (*PKIAssets, 
 	}
 	logger.Info("Successfully loaded PKI assets")
 	return assets, nil
+}
+
+// pipelineOverridesEnv lets a dev relay accept per-request build_dir / builder_container values.
+const pipelineOverridesEnv = "CIC_PIPELINE_ALLOW_OVERRIDES"
+
+// pipelineOverridesAllowed reports whether pipeline requests may override the operator's build
+// directory and builder container: only in dev trust mode with CIC_PIPELINE_ALLOW_OVERRIDES set to
+// exactly "1". Prod ignores the variable.
+func pipelineOverridesAllowed(trustMode string) bool {
+	return trustMode == TrustModeDev && os.Getenv(pipelineOverridesEnv) == "1"
 }

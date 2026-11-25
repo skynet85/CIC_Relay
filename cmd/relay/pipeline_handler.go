@@ -118,7 +118,11 @@ func (s *relayServer) pipelineHandler(w http.ResponseWriter, r *http.Request) {
 		SourceDigest: sourceDigest,
 	}
 
+	// One run per build directory at a time: the run deletes and rebuilds it across its steps.
+	buildDir, _ := payload["build_dir"].(string)
+	unlock := lockBuildDir(buildDir)
 	resp, err := s.api.Setx(r.Context(), sp)
+	unlock()
 	if err != nil {
 		if cabinet.IsUnauthorized(err) {
 			logEntry.WithField("outcome", "unauthorized").WithError(err).Warn("Protected operation without an authenticated principal")

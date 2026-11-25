@@ -1,0 +1,122 @@
+---
+package: schemapipeline_test
+description: ''
+tags:
+- schema
+- test
+category: []
+used_in: []
+entrypoint: false
+related_nodes: []
+objects:
+- name: startInput
+  kind: func
+  description: startInput is a valid cic.pipeline.start input, adjusted by the caller.
+  references: []
+  calls: []
+- name: sentinelDir
+  kind: func
+  description: sentinelDir is a build dir with a file in it, to prove start did not
+    delete it.
+  references:
+  - require.NoError
+  calls:
+  - require.NoError
+- name: assertUntouched
+  kind: func
+  description: ''
+  references:
+  - assert.Empty
+  - assert.NoError
+  calls:
+  - assert.Empty
+  - assert.NoError
+- name: TestStart_RejectsOptionLikeAndOddArguments
+  kind: func
+  description: ''
+  references:
+  - schemapipeline.PipelineConfig
+  - require.Error
+  - assert.Contains
+  - schemapipeline.PipelineConfig.NewStartFunc
+  calls:
+  - Error
+  - assert.Contains
+  - require.Error
+  - schemapipeline.PipelineConfig.NewStartFunc
+- name: TestStart_AcceptsTheSupportedURLForms
+  kind: func
+  description: ''
+  references:
+  - schemapipeline.PipelineConfig
+  - require.NotEmpty
+  - assert.Contains
+  - schemapipeline.PipelineConfig.NewStartFunc
+  calls:
+  - assert.Contains
+  - require.NotEmpty
+  - schemapipeline.PipelineConfig.NewStartFunc
+- name: TestStart_RefusesUnsafeBuildDirs
+  kind: func
+  description: ''
+  references:
+  - schemapipeline.PipelineConfig
+  - require.Error
+  - assert.Contains
+  - assert.Empty
+  - schemapipeline.PipelineConfig.NewStartFunc
+  calls:
+  - Error
+  - assert.Contains
+  - assert.Empty
+  - require.Error
+  - schemapipeline.PipelineConfig.NewStartFunc
+- name: TestStart_RestrictOverrides
+  kind: func
+  description: ''
+  references:
+  - schemapipeline.PipelineConfig
+  - require.Error
+  - assert.Contains
+  - assert.NotEmpty
+  - require.NotEmpty
+  - schemapipeline.PipelineConfig.NewStartFunc
+  calls:
+  - Error
+  - assert.Contains
+  - assert.NotEmpty
+  - require.Error
+  - require.NotEmpty
+  - schemapipeline.PipelineConfig.NewStartFunc
+- name: TestMakeSteps_RefuseOptionLikeTargetsAndContainerOverrides
+  kind: func
+  description: ''
+  references:
+  - schemapipeline.PipelineConfig
+  - require.Error
+  - assert.Contains
+  - assert.Empty
+  - schemapipeline.PipelineConfig.NewRepoBuildFunc
+  - schemapipeline.PipelineConfig.NewTestFunc
+  calls:
+  - Error
+  - assert.Contains
+  - assert.Empty
+  - require.Error
+  - schemapipeline.PipelineConfig.NewRepoBuildFunc
+  - schemapipeline.PipelineConfig.NewTestFunc
+- name: TestRelease_RefusesUnsafeSchemaVersionAndOverrides
+  kind: func
+  description: ''
+  references:
+  - schemapipeline.PipelineConfig
+  - require.Error
+  - assert.Contains
+  - assert.Empty
+  - schemapipeline.PipelineConfig.NewReleaseFunc
+  calls:
+  - Error
+  - assert.Contains
+  - assert.Empty
+  - require.Error
+  - schemapipeline.PipelineConfig.NewReleaseFunc
