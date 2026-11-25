@@ -1,5 +1,7 @@
 # CIC\_Relay\_Specification.md
 
+> **Történeti dokumentum (2025).** Egy korai, router-alapú elképzelést ír le (EntryPointHandler, GraphRouter, RelayConnector), nem a mai rendszert. A mai működés: `README.md`, `ai/SYSTEM_CONTEXT.md`, `docs/hu/architecture.md`.
+
 ## CIC Relay modul – specifikáció
 
 Ez a dokumentum a CIC Relay komponens specifikációját tartalmazza. A komponens célja, hogy validált, szabályozott adatátvitelt biztosítson a CIC rendszer különböző moduljai és végrehajtási pontjai között.

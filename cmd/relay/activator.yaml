@@ -30,19 +30,24 @@ objects:
 - name: Activate
   kind: method
   receiver: CabinetActivator
-  description: Activate executes the workflow for a validated, desired-present IaC
+  description: 'Activate executes the workflow for a validated, desired-present IaC
     resource. It maps res.SchemaRef to WorkflowID, passes res.Spec directly as the
-    payload, and calls Cabinet.Setx().
+    payload, and runs it through API.Set, so the same request validation applies as
+    on the HTTP path. The ProofTrace is anchored to the resource''s declared intent:
+    SourceDigest is iac.SpecDigest(res.Spec), the canonical digest of the spec, so
+    a trace names the exact declaration it executed.'
   references:
   - types.ResourceSpec
+  - iac.SpecDigest
   - cabinet.SetPayload
   - cabinet.ModuleID
-  - cabinet.CanonicalizeSetPayload
+  - cabinet.NewAPI
   - logrus.Fields
   calls:
   - Info
-  - Setx
+  - Set
   - WithField
   - WithFields
-  - cabinet.CanonicalizeSetPayload
   - cabinet.ModuleID
+  - cabinet.NewAPI
+  - iac.SpecDigest

@@ -32,7 +32,9 @@ type SchemaConfig struct {
 	Timestamp        string            `json:"timestamp,omitempty" yaml:"timestamp,omitempty"`
 	StateRequirement map[string]string `json:"stateRequirement,omitempty" yaml:"stateRequirement,omitempty"`
 	Dependencies     []string          `json:"dependencies,omitempty" yaml:"dependencies,omitempty"`
-	NextHops         []string          `json:"nextHops,omitempty" yaml:"nextHops,omitempty"`
+	// NextHops is reserved for graph routing (docs/hu/concept/graf_vegrehajtas.md). Setx does not
+	// read it: workflow execution is the linear step list.
+	NextHops []string `json:"nextHops,omitempty" yaml:"nextHops,omitempty"`
 }
 
 // SchemaSigning holds cryptographic evidence fields – checksum, signature, certificate.

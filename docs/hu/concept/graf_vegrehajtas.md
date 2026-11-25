@@ -1,5 +1,7 @@
 # Gráf-alapú végrehajtás a CIC relay-ben
 
+> **Koncepció, nem a mai állapot.** A `Setx` ma lineáris lépéssort hajt végre; a `NextHops` mező létezik, de semmi nem olvassa, elágazás és párhuzamos ág nincs.
+
 A CIC rendszer végrehajtási logikája egy deklarált, sémákból felépülő **irányított gráf** mentén történik. Ez a gráf határozza meg, hogy egy adott relay milyen műveleti sémákat hajtson végre, milyen sorrendben, milyen függőségek teljesülése esetén.
 
 A relay minden végrehajtási folyamatot **determinált módon** kezel: nem dönt önállóan, hanem kizárólag a `ExecutionGraph`, a séma definíciók és az aktuális állapot alapján működik.

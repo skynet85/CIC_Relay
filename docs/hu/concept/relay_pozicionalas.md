@@ -1,5 +1,7 @@
 # Relay komponens pozíciója a CIC rendszerben
 
+> **Koncepció, nem a mai állapot.** A mai relay futási útján vannak mellékhatásos lépések is: git clone, `make` a builder-konténerben (`docker exec`), git commit a recorderben. A „nem hajt végre kódot, nem ír fájlt” a cél-architektúra, nem a jelenlegi viselkedés.
+
 A relay a CIC rendszer központi végrehajtó egysége. Feladata, hogy a deklarált séma-, gráf- és állapotleírások alapján meghatározza, **milyen műveletet kell végrehajtani, milyen sorrendben, milyen feltételekkel**, és mindezt **stateless, determinisztikus módon** végzi.
 
 ## A relay mint végrehajtó motor

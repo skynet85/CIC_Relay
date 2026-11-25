@@ -28,6 +28,17 @@ objects:
   - types.SchemaRef
   - types.ResourceState
   calls: []
+- name: allowLookups
+  kind: func
+  description: allowLookups lets API.Set's request validation (workflow and module
+    lookups) pass.
+  references:
+  - mock.Anything
+  - cabinet.Workflow
+  - cabinet.ModuleDescriptor
+  calls:
+  - Return
+  - mockCabinetService.On
 - name: TestCabinetActivator_Activate_Success
   kind: func
   description: ''
@@ -85,6 +96,8 @@ objects:
   - require.NoError
   - require.NotNil
   - assert.Equal
+  - iac.SpecDigest
+  - assert.NotEmpty
   - mock.Arguments.Get
   calls:
   - Activate
@@ -92,7 +105,65 @@ objects:
   - Return
   - Run
   - assert.Equal
+  - assert.NotEmpty
+  - iac.SpecDigest
   - mock.Arguments.Get
   - mockCabinetService.On
   - require.NoError
   - require.NotNil
+- name: TestCabinetActivator_Activate_ValidatesThroughAPISet
+  kind: func
+  description: ''
+  references:
+  - mock.Anything
+  - cabinet.ErrNotFound
+  - require.Error
+  - assert.True
+  - cabinet.IsNotFound
+  calls:
+  - Activate
+  - NewCabinetActivator
+  - Return
+  - assert.True
+  - cabinet.IsNotFound
+  - mockCabinetService.AssertNotCalled
+  - mockCabinetService.On
+  - require.Error
+- name: TestCabinetActivator_Activate_SameSpecSameAnchor
+  kind: func
+  description: ''
+  references:
+  - mock.Anything
+  - mock.Arguments
+  - cabinet.SetPayload
+  - cabinet.SetResponse
+  - require.NoError
+  - require.Len
+  - assert.Equal
+  - assert.NotEqual
+  - mock.Arguments.Get
+  calls:
+  - Activate
+  - NewCabinetActivator
+  - Return
+  - Run
+  - assert.Equal
+  - assert.NotEqual
+  - mock.Arguments.Get
+  - mockCabinetService.On
+  - require.Len
+  - require.NoError
+- name: TestCabinetActivator_Activate_UndigestableSpec
+  kind: func
+  description: ''
+  references:
+  - require.Error
+  - assert.Contains
+  - mock.Anything
+  calls:
+  - Activate
+  - Error
+  - NewCabinetActivator
+  - assert.Contains
+  - mockCabinetService.AssertNotCalled
+  - require.Error
