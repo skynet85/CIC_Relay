@@ -97,6 +97,7 @@ type cabinetService struct {
 	wasmManager wasmManager
 	clock       func() string     // injected; returns UTC timestamp for ProofTrace
 	recorder    ExecutionRecorder // optional; nil = skip recording
+	signer      TraceSigner       // optional; nil = traces are not signed
 
 	// evidenceRequired makes an execution whose proof was not persisted (recording
 	// failed, or no recorder is configured) fail with ErrEvidenceRequired instead of
@@ -140,6 +141,15 @@ func WithProtectedModules(componentIDs ...string) CabinetOption {
 func WithEvidenceRequired(required bool) CabinetOption {
 	return func(s *cabinetService) {
 		s.evidenceRequired = required
+	}
+}
+
+// WithTraceSigner signs the chain hash of every ProofTrace (completed and failed runs) with
+// signer before it is recorded, so a verifier holding the relay's key can check where a trace
+// came from. Nil disables signing.
+func WithTraceSigner(signer TraceSigner) CabinetOption {
+	return func(s *cabinetService) {
+		s.signer = signer
 	}
 }
 
@@ -203,148 +213,27 @@ func (c *cabinetService) Setx(ctx context.Context, in *SetPayload) (*SetResponse
 	// 3. Initialize executionContext and run each step.
 	execCtx := NewExecutionContext(in.Payload)
 	traceSteps := make([]ProofTraceStep, 0, len(graph.Steps))
+	// dispatched turns true once any step has been dispatched to a module: from then on
+	// a failure is recorded (with the completed steps), since side effects may have happened.
+	dispatched := false
 
-	for _, step := range graph.Steps {
-		// 3a. Resolve the component.
-		moduleDesc, err := c.GetModule(step.ComponentID)
+	for i := range graph.Steps {
+		step := graph.Steps[i]
+		rec, err := c.runStep(ctx, workflow, step, execCtx, &dispatched)
 		if err != nil {
-			return nil, fmt.Errorf("workflow %q failed: could not resolve component %q: %w", workflow.ID(), step.ComponentID, err)
+			if !dispatched {
+				return nil, err
+			}
+			return nil, c.failedRunError(ctx, workflow.ID(), in.SourceDigest, traceSteps, step.Raw, err)
 		}
-
-		// 3b. Resolve input from the execution context.
-		inputData, ok := execCtx.Get(step.InputKey)
-		if !ok {
-			return nil, fmt.Errorf("workflow %q failed: input key %q not found in context for step %q", workflow.ID(), step.InputKey, step.Raw)
-		}
-
-		// 3c. Validate inputData against the module's declared accepted schemas.
-		if err := validateInputSchema(moduleDesc, inputData); err != nil {
-			return nil, fmt.Errorf("schema validation failed at step %q: %w", step.Raw, err)
-		}
-
-		// 3d. Hash input for ProofTrace (before dispatch).
-		inputHash, err := hashValue(inputData)
-		if err != nil {
-			return nil, fmt.Errorf("failed to hash input at step %q: %w", step.Raw, err)
-		}
-
-		// 3e. Dispatch the call based on the module type.
-		var result interface{}
-		var execErr error
-
-		if moduleDesc.NativeImpl != nil {
-			// --- NATIVE GO EXECUTION ---
-			nativeFunc, ok := moduleDesc.NativeImpl[step.FunctionName]
-			if !ok {
-				return nil, fmt.Errorf("component %q does not have native function %q", step.ComponentID, step.FunctionName)
-			}
-
-			funcValue := reflect.ValueOf(nativeFunc)
-			if funcValue.Kind() != reflect.Func || funcValue.Type().NumIn() != 2 ||
-				funcValue.Type().In(0) != reflect.TypeOf((*context.Context)(nil)).Elem() ||
-				funcValue.Type().In(1) != reflect.TypeOf((*interface{})(nil)).Elem() ||
-				funcValue.Type().NumOut() != 2 ||
-				funcValue.Type().Out(1) != reflect.TypeOf((*error)(nil)).Elem() {
-				return nil, fmt.Errorf("native function %s.%s has unexpected signature", step.ComponentID, step.FunctionName)
-			}
-
-			args := []reflect.Value{reflect.ValueOf(ctx), reflect.ValueOf(inputData)}
-			results := funcValue.Call(args)
-
-			if len(results) > 0 {
-				result = results[0].Interface()
-			}
-			if len(results) > 1 && !results[1].IsNil() {
-				execErr = results[1].Interface().(error)
-			}
-		} else if moduleDesc.WasmCode != nil {
-			// --- WASM EXECUTION ---
-			host, err := c.wasmManager.NewHostInstance(ctx, step.ComponentID)
-			if err != nil {
-				return nil, fmt.Errorf("failed to create WASM host instance for module %q: %w", step.ComponentID, err)
-			}
-			defer host.Close(ctx)
-
-			inputJson, err := json.Marshal(inputData)
-			if err != nil {
-				return nil, fmt.Errorf("failed to marshal input data for WASM module %q: %w", step.ComponentID, err)
-			}
-
-			authContextJson := step.ComponentID
-			normalizedFn := strings.ToLower(step.FunctionName)
-
-			var dataResult, errorResult string
-			switch normalizedFn {
-			case "init":
-				dataResult, errorResult = host.Init(ctx, authContextJson, string(inputJson))
-			case "process":
-				dataResult, errorResult = host.Process(ctx, authContextJson, string(inputJson))
-			case "get":
-				dataResult, errorResult = host.Get(ctx, authContextJson, string(inputJson))
-			case "notify":
-				dataResult, errorResult = host.Notify(ctx, authContextJson, string(inputJson))
-			default:
-				execErr = fmt.Errorf("WASM module %q does not support operation %q", step.ComponentID, step.FunctionName)
-			}
-
-			if execErr == nil {
-				if errorResult != "null" && errorResult != "" {
-					if isWasmTimeout(errorResult) {
-						execErr = fmt.Errorf("%w: WASM step %q exceeded time budget", ErrTimeout, step.Raw)
-					} else {
-						execErr = fmt.Errorf("WASM function %s.%s returned error: %s", step.ComponentID, step.FunctionName, errorResult)
-					}
-				} else {
-					var jsonResult interface{}
-					if err := json.Unmarshal([]byte(dataResult), &jsonResult); err != nil {
-						result = dataResult
-					} else {
-						result = jsonResult
-					}
-				}
-			}
-		} else {
-			return nil, fmt.Errorf("component %s has no implementation (native or WASM)", step.ComponentID)
-		}
-
-		if execErr != nil {
-			return nil, fmt.Errorf("error executing step %q in workflow %q: %w", step.Raw, workflow.ID(), execErr)
-		}
-
-		// 3f. Hash output and record ProofTrace step.
-		outputHash, err := hashValue(result)
-		if err != nil {
-			return nil, fmt.Errorf("failed to hash output at step %q: %w", step.Raw, err)
-		}
-		traceSteps = append(traceSteps, ProofTraceStep{
-			Name:       step.Raw,
-			Module:     step.ComponentID,
-			InputHash:  inputHash,
-			OutputHash: outputHash,
-		})
-
-		// 3g. Store the result under the step's declared output key.
-		execCtx.Set(step.OutputKey, result)
+		traceSteps = append(traceSteps, rec)
 	}
 
-	// 3. Build ProofTrace.
-	clockFn := c.clock
-	if clockFn == nil {
-		clockFn = func() string { return time.Now().UTC().Format(time.RFC3339) }
-	}
-	trace := &ProofTrace{
-		WorkflowID:   workflow.ID(),
-		SourceDigest: in.SourceDigest,
-		Steps:        traceSteps,
-		ChainHash:    ComputeChainHashV1(workflow.ID(), in.SourceDigest, traceSteps),
-		Timestamp:    clockFn(),
-	}
-
-	// 4. Record the execution. A failure is non-fatal by default (Vault may be
-	// unavailable) but is always reported in the response; with evidenceRequired it
-	// fails the call. The workflow has already run at this point, so the error
-	// carries the chain hash: the partial evidence is not lost.
-	proof := c.recordProof(ctx, workflow.ID(), trace)
+	// 3. Build, sign and record the ProofTrace. A recording failure is non-fatal by default
+	// (Vault may be unavailable) but is always reported in the response; with evidenceRequired
+	// it fails the call. The workflow has already run at this point, so the error carries the
+	// chain hash: the partial evidence is not lost.
+	trace, proof := c.finishTrace(ctx, workflow.ID(), in.SourceDigest, traceSteps, TraceStatusCompleted, "")
 	if c.evidenceRequired && !proof.Persisted {
 		return nil, &EvidenceRequiredError{WorkflowID: workflow.ID(), ChainHash: trace.ChainHash, ErrorCode: proof.ErrorCode}
 	}
@@ -355,6 +244,172 @@ func (c *cabinetService) Setx(ctx context.Context, in *SetPayload) (*SetResponse
 		Trace:    trace,
 		Proof:    proof,
 	}, nil
+}
+
+// runStep resolves, validates and runs one workflow step, stores its result in execCtx and
+// returns its ProofTrace record. It sets *dispatched just before handing the step to a module,
+// the point after which the step may have had side effects.
+func (c *cabinetService) runStep(ctx context.Context, workflow *Workflow, step ExecutionGraphStep, execCtx *executionContext, dispatched *bool) (ProofTraceStep, error) {
+	// 3a. Resolve the component.
+	moduleDesc, err := c.GetModule(step.ComponentID)
+	if err != nil {
+		return ProofTraceStep{}, fmt.Errorf("workflow %q failed: could not resolve component %q: %w", workflow.ID(), step.ComponentID, err)
+	}
+
+	// 3b. Resolve input from the execution context.
+	inputData, ok := execCtx.Get(step.InputKey)
+	if !ok {
+		return ProofTraceStep{}, fmt.Errorf("workflow %q failed: input key %q not found in context for step %q", workflow.ID(), step.InputKey, step.Raw)
+	}
+
+	// 3c. Validate inputData against the module's declared accepted schemas.
+	if err := validateInputSchema(moduleDesc, inputData); err != nil {
+		return ProofTraceStep{}, fmt.Errorf("schema validation failed at step %q: %w", step.Raw, err)
+	}
+
+	// 3d. Hash input for ProofTrace (before dispatch).
+	inputHash, err := hashValue(inputData)
+	if err != nil {
+		return ProofTraceStep{}, fmt.Errorf("failed to hash input at step %q: %w", step.Raw, err)
+	}
+
+	// From here on the step may have side effects: a failure is recorded as evidence.
+	*dispatched = true
+
+	// 3e. Dispatch the call based on the module type.
+	var result interface{}
+	var execErr error
+
+	if moduleDesc.NativeImpl != nil {
+		// --- NATIVE GO EXECUTION ---
+		nativeFunc, ok := moduleDesc.NativeImpl[step.FunctionName]
+		if !ok {
+			return ProofTraceStep{}, fmt.Errorf("component %q does not have native function %q", step.ComponentID, step.FunctionName)
+		}
+
+		funcValue := reflect.ValueOf(nativeFunc)
+		if funcValue.Kind() != reflect.Func || funcValue.Type().NumIn() != 2 ||
+			funcValue.Type().In(0) != reflect.TypeOf((*context.Context)(nil)).Elem() ||
+			funcValue.Type().In(1) != reflect.TypeOf((*interface{})(nil)).Elem() ||
+			funcValue.Type().NumOut() != 2 ||
+			funcValue.Type().Out(1) != reflect.TypeOf((*error)(nil)).Elem() {
+			return ProofTraceStep{}, fmt.Errorf("native function %s.%s has unexpected signature", step.ComponentID, step.FunctionName)
+		}
+
+		args := []reflect.Value{reflect.ValueOf(ctx), reflect.ValueOf(inputData)}
+		results := funcValue.Call(args)
+
+		if len(results) > 0 {
+			result = results[0].Interface()
+		}
+		if len(results) > 1 && !results[1].IsNil() {
+			execErr = results[1].Interface().(error)
+		}
+	} else if moduleDesc.WasmCode != nil {
+		// --- WASM EXECUTION ---
+		host, err := c.wasmManager.NewHostInstance(ctx, step.ComponentID)
+		if err != nil {
+			return ProofTraceStep{}, fmt.Errorf("failed to create WASM host instance for module %q: %w", step.ComponentID, err)
+		}
+		defer host.Close(ctx)
+
+		inputJson, err := json.Marshal(inputData)
+		if err != nil {
+			return ProofTraceStep{}, fmt.Errorf("failed to marshal input data for WASM module %q: %w", step.ComponentID, err)
+		}
+
+		authContextJson := step.ComponentID
+		normalizedFn := strings.ToLower(step.FunctionName)
+
+		var dataResult, errorResult string
+		switch normalizedFn {
+		case "init":
+			dataResult, errorResult = host.Init(ctx, authContextJson, string(inputJson))
+		case "process":
+			dataResult, errorResult = host.Process(ctx, authContextJson, string(inputJson))
+		case "get":
+			dataResult, errorResult = host.Get(ctx, authContextJson, string(inputJson))
+		case "notify":
+			dataResult, errorResult = host.Notify(ctx, authContextJson, string(inputJson))
+		default:
+			execErr = fmt.Errorf("WASM module %q does not support operation %q", step.ComponentID, step.FunctionName)
+		}
+
+		if execErr == nil {
+			if errorResult != "null" && errorResult != "" {
+				if isWasmTimeout(errorResult) {
+					execErr = fmt.Errorf("%w: WASM step %q exceeded time budget", ErrTimeout, step.Raw)
+				} else {
+					execErr = fmt.Errorf("WASM function %s.%s returned error: %s", step.ComponentID, step.FunctionName, errorResult)
+				}
+			} else {
+				var jsonResult interface{}
+				if err := json.Unmarshal([]byte(dataResult), &jsonResult); err != nil {
+					result = dataResult
+				} else {
+					result = jsonResult
+				}
+			}
+		}
+	} else {
+		return ProofTraceStep{}, fmt.Errorf("component %s has no implementation (native or WASM)", step.ComponentID)
+	}
+
+	if execErr != nil {
+		return ProofTraceStep{}, fmt.Errorf("error executing step %q in workflow %q: %w", step.Raw, workflow.ID(), execErr)
+	}
+
+	// 3f. Hash output and record ProofTrace step.
+	outputHash, err := hashValue(result)
+	if err != nil {
+		return ProofTraceStep{}, fmt.Errorf("failed to hash output at step %q: %w", step.Raw, err)
+	}
+	// 3g. Store the result under the step's declared output key.
+	execCtx.Set(step.OutputKey, result)
+	return ProofTraceStep{
+		Name:           step.Raw,
+		Module:         step.ComponentID,
+		ModuleChecksum: moduleDesc.Checksum(),
+		InputHash:      inputHash,
+		OutputHash:     outputHash,
+	}, nil
+}
+
+// finishTrace builds the v2 ProofTrace of a run (completed or failed), signs its chain hash
+// when a TraceSigner is configured, and records it. A signing failure leaves Signature empty
+// and is logged: the trace keeps its integrity, only the proof of origin is missing.
+func (c *cabinetService) finishTrace(ctx context.Context, workflowID, sourceDigest string, steps []ProofTraceStep, status, failedStep string) (*ProofTrace, *ProofStatus) {
+	clockFn := c.clock
+	if clockFn == nil {
+		clockFn = func() string { return time.Now().UTC().Format(time.RFC3339) }
+	}
+	trace := &ProofTrace{
+		WorkflowID:   workflowID,
+		SourceDigest: sourceDigest,
+		ChainVersion: ChainVersionV2,
+		Status:       status,
+		FailedStep:   failedStep,
+		Steps:        steps,
+		Timestamp:    clockFn(),
+	}
+	trace.ChainHash = ComputeChainHashV2(trace)
+	if c.signer != nil {
+		sig, err := c.signer.Sign(ctx, []byte(trace.ChainHash))
+		if err != nil {
+			logrus.WithFields(logrus.Fields{"workflow_id": workflowID, "error": err}).Warn("ProofTrace not signed: signing failed")
+		} else {
+			trace.Signature = sig
+		}
+	}
+	return trace, c.recordProof(ctx, workflowID, trace)
+}
+
+// failedRunError records the trace of a run that failed after a step had been dispatched
+// (completed steps plus the failed one's name, status "failed") and returns cause wrapped in an
+// ExecutionFailedError that carries that trace and its proof status.
+func (c *cabinetService) failedRunError(ctx context.Context, workflowID, sourceDigest string, steps []ProofTraceStep, failedStep string, cause error) error {
+	trace, proof := c.finishTrace(ctx, workflowID, sourceDigest, steps, TraceStatusFailed, failedStep)
+	return &ExecutionFailedError{Err: cause, Trace: trace, Proof: proof}
 }
 
 // recordProof persists the trace through the configured recorder and reports the outcome.

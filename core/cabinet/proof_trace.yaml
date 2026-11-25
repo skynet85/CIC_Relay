@@ -11,17 +11,24 @@ objects:
 - name: ProofTraceStep
   kind: struct
   description: ProofTraceStep records the cryptographic fingerprint of a single workflow
-    step.
+    step. ModuleChecksum is the content checksum of the module that ran the step (for
+    a WASM module it covers the canonical WASM binary). Module alone is the "name@version"
+    label, under which two different binaries can be registered; the checksum names
+    the artifact. It is bound by the v2 chain hash and ignored by v1.
   implements: []
   references: []
 - name: ProofTrace
   kind: struct
-  description: ProofTrace is the immutable audit record of a completed workflow execution.
+  description: 'ProofTrace is the immutable audit record of a completed workflow execution.
     Every field is deterministic and canonicalizable; no clock or RNG side-effects
     are introduced here — the Timestamp must be injected by the caller. SourceDigest
     anchors the chain to the source revision. It is injected by the caller (e.g. git
     HEAD commit hash or BuildID) and becomes the first input of ChainHash, making
-    the hash-chain continuous from source to output.
+    the hash-chain continuous from source to output. ChainVersion names the chain
+    hash format (empty = v1). Status and FailedStep record the outcome: a failed run
+    is recorded too, with the steps that completed. Signature, when present, is the
+    relay''s signature over ChainHash (TraceSigner); it is not part of the hash, and
+    it is what turns a well-formed trace into one whose origin can be checked.'
   implements: []
   references: []
 - name: ActuationProof
@@ -35,6 +42,20 @@ objects:
     ChainHash and the Rust ChainedEntry record_hash.'
   implements: []
   references: []
+- name: TraceSigner
+  kind: interface
+  description: 'TraceSigner signs the chain hash of a ProofTrace with the relay''s
+    key (for example a Vault Transit key: crypto.CryptoService satisfies it). The
+    key never leaves the backend.'
+  references: []
+  methods:
+  - Sign
+- name: TraceVerifier
+  kind: interface
+  description: TraceVerifier checks a ProofTrace signature against the relay's key.
+  references: []
+  methods:
+  - Verify
 - name: ProofTraceStepFromActuation
   kind: func
   description: ProofTraceStepFromActuation projects an http-executor actuation's non-secret
@@ -79,3 +100,50 @@ objects:
     producing the same outputs cannot share the same ChainHash.'
   references: []
   calls: []
+- name: ComputeChainHashV2
+  kind: func
+  description: 'ComputeChainHashV2 returns the v2 chain hash of t: SHA-256 over "CICCHAINv2"
+    ‖ f(source_digest) ‖ f(workflow_id) ‖ f(status) ‖ f(failed_step) ‖ f(timestamp)
+    ‖ f(len(steps)) ‖ per step: f(name) ‖ f(module) ‖ f(module_checksum) ‖ f(input_hash)
+    ‖ f(output_hash) where f(x) is the 8-byte big-endian length of x followed by x.
+    Length prefixes make the encoding unambiguous for any field content (v1''s NUL
+    separators are ambiguous when a field itself contains a NUL byte). Compared with
+    v1 it also binds the module checksum of every step, the timestamp and the outcome
+    of the run. ChainHash, ChainVersion and Signature are not inputs.'
+  references: []
+  calls:
+  - PutUint64
+  - Sum
+  - Write
+- name: ComputeChainHash
+  kind: func
+  description: 'ComputeChainHash returns the chain hash of t in the format its ChainVersion
+    names: v2 (ComputeChainHashV2) for "v2", v1 (ComputeChainHashV1) for "" and "v1".
+    It returns "" for an unknown version, which never equals a declared hash, so a
+    verifier rejects it.'
+  references: []
+  calls:
+  - ComputeChainHashV1
+  - ComputeChainHashV2
+- name: ChainVersionV1
+  kind: const
+  description: 'ChainVersionV1 is the original format (ComputeChainHashV1): source,
+    workflow and per-step name/module/input/output, NUL-separated. It binds neither
+    the module binary, the timestamp nor the outcome of the run.'
+  references: []
+- name: ChainVersionV2
+  kind: const
+  description: 'ChainVersionV2 is ComputeChainHashV2: length-prefixed fields that
+    also bind the module checksum of every step, the timestamp and the outcome (status,
+    failed step).'
+  references: []
+- name: TraceStatusCompleted
+  kind: const
+  description: 'TraceStatusCompleted: every step ran.'
+  references: []
+- name: TraceStatusFailed
+  kind: const
+  description: 'TraceStatusFailed: a step failed after the run had started; Steps
+    holds the steps that completed and FailedStep names the one that did not. Earlier
+    steps may have had side effects.'
+  references: []

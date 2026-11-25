@@ -28,7 +28,11 @@ objects:
   references: []
 - name: VerifyResult
   kind: struct
-  description: VerifyResult is the output of VerifyProofArtifact.
+  description: 'VerifyResult is the output of VerifyProofArtifact (and of the authenticity
+    check on top of it). Valid means the artifact is well formed and its chain hash
+    recomputes: integrity. It does not say who produced it — anyone can compute a
+    SHA-256 chain. Authentic means, in addition, that the artifact''s signature over
+    the chain hash verifies against the relay''s key.'
   implements: []
   references: []
 - name: VerifyProofArtifact
@@ -40,16 +44,41 @@ objects:
     all non-empty. 4. pose_result value is one of: VERIFIED | DRIFT | SKIPPED (when
     present). 5. commit_record.id == chain_hash when commit_record is present.'
   references:
-  - cabinet.ProofTraceStep
-  - cabinet.ComputeChainHashV1
+  - cabinet.ChainVersionV1
+  - cabinet.ChainVersionV2
+  - cabinet.ComputeChainHash
+  - cabinet.TraceStatusCompleted
+  - cabinet.TraceStatusFailed
   calls:
-  - cabinet.ComputeChainHashV1
+  - cabinet.ComputeChainHash
 - name: ProofArtifactFromTrace
   kind: func
   description: ProofArtifactFromTrace converts a cabinet.ProofTrace to a ProofArtifact.
   references:
   - cabinet.ProofTrace
   calls: []
+- name: toTrace
+  kind: method
+  receiver: ProofArtifact
+  description: 'toTrace is the inverse of ProofArtifactFromTrace: the cabinet.ProofTrace
+    the artifact describes.'
+  references:
+  - cabinet.ProofTrace
+  - cabinet.ProofTraceStep
+  calls: []
+- name: VerifyProofAuthenticity
+  kind: func
+  description: 'VerifyProofAuthenticity adds the origin check to an integrity result
+    r of a: it sets r.Authentic when a carries a signature over its chain hash that
+    verifies against the relay''s key (verifier). A signature that does not verify
+    makes the artifact invalid: the chain was altered or was not signed by this relay.
+    An unsigned artifact, a relay with no verifier, or a verifier backend error leave
+    Authentic false with a warning: integrity only, origin not proven.'
+  references:
+  - cabinet.TraceVerifier
+  - cabinet.TraceVerifier.Verify
+  calls:
+  - cabinet.TraceVerifier.Verify
 - name: MarshalProofArtifact
   kind: func
   description: MarshalProofArtifact serializes a ProofArtifact to canonical JSON format

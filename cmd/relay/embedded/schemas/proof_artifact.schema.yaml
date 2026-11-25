@@ -11,4 +11,7 @@ config:
     Every ProofTrace-based execution produces one artifact of this shape.
     The schema is the contract between runtime, Git state recorder, and verifier.
     Required fields: workflow_id, source_digest, chain_hash, steps, timestamp.
-    Optional: pose_result (VERIFIED|DRIFT|SKIPPED), commit_record.
+    Optional: chain_version (v1|v2; empty = v1), status (completed|failed),
+    failed_step (required when status is failed), signature (the relay's signature
+    over chain_hash; it makes the artifact's origin checkable, not only its integrity),
+    per-step module_checksum (bound by v2), pose_result (VERIFIED|DRIFT|SKIPPED), commit_record.

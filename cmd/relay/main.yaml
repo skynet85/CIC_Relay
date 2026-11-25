@@ -36,6 +36,7 @@ objects:
   - obs.MetricSink
   - obs.Resource
   - obs.PrometheusSink
+  - cabinet.TraceVerifier
 - name: VaultSecrets
   kind: struct
   description: VaultSecrets holds Vault connection parameters loaded from the environment.
@@ -151,6 +152,7 @@ objects:
   - logrus.Fields
   - cabinet.SetPayload
   - cabinet.NewAPI
+  - cabinet.ExecutionFailedError
   - cabinet.IsTimeout
   - cabinet.IsUnauthorized
   - cabinet.IsEvidenceRequired
@@ -203,8 +205,9 @@ objects:
 - name: evidenceRequiredFromEnv
   kind: func
   description: evidenceRequiredFromEnv reads CIC_EVIDENCE_REQUIRED. Unset or empty
-    means false; only "true" and "false" are accepted, so a typo cannot silently switch
-    a required mode off.
+    means false, except with CIC_TRUST_MODE=prod, where it means true and an explicit
+    "false" is a start-up error. Only "true" and "false" are accepted, so a typo cannot
+    silently switch a required mode off.
   references: []
   calls: []
 - name: buildRecorderOption
@@ -303,7 +306,8 @@ objects:
   - cabinet.NewMemModuleStore
   - cabinet.WasmManagerConfig
   - schemacompile.ArtifactSigner
-  - crypto.NewVaultCryptoService
+  - cabinet.TraceSigner
+  - cabinet.TraceVerifier
   - git.NewRepoRegistry
   - git.NewExecGitOps
   - obs.NewLogrusSink
@@ -313,6 +317,7 @@ objects:
   - cabinet.NewCabinetService
   - cabinet.WithEvidenceRequired
   - cabinet.WithProtectedModules
+  - cabinet.WithTraceSigner
   - merkle.BuildContext
   - merkle.GoSumDigest
   - merkle.GoRuntimeDigest
@@ -338,7 +343,7 @@ objects:
   - cabinet.WithEvidenceRequired
   - cabinet.WithObsSinks
   - cabinet.WithProtectedModules
-  - crypto.NewVaultCryptoService
+  - cabinet.WithTraceSigner
   - git.NewExecGitOps
   - git.NewRepoRegistry
   - isolation.RunWorkerLoop

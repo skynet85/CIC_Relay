@@ -77,7 +77,7 @@ func TestSetx_HTTPRequestCapability(t *testing.T) {
 	assert.Equal(t, "http@1.0", step.Module)
 	assert.NotEmpty(t, step.InputHash)
 	assert.NotEmpty(t, step.OutputHash)
-	assert.Equal(t, ComputeChainHashV1(resp.Trace.WorkflowID, "", resp.Trace.Steps), resp.Trace.ChainHash)
+	assert.Equal(t, ComputeChainHashV2(resp.Trace), resp.Trace.ChainHash)
 
 	// The opened credential never reaches the ProofTrace (only hashes/outcome).
 	assert.NotContains(t, resp.Trace.Steps[0].OutputHash, "TOPSECRET")

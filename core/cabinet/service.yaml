@@ -113,6 +113,13 @@ objects:
     outage is then reported in SetResponse.Proof only.'
   references: []
   calls: []
+- name: WithTraceSigner
+  kind: func
+  description: WithTraceSigner signs the chain hash of every ProofTrace (completed
+    and failed runs) with signer before it is recorded, so a verifier holding the
+    relay's key can check where a trace came from. Nil disables signing.
+  references: []
+  calls: []
 - name: WithObsSinks
   kind: func
   description: 'WithObsSinks wires observability sinks into the underlying WasmManager.
@@ -139,32 +146,67 @@ objects:
     and recording ProofTrace steps with input/output hashing.
   references: []
   calls:
-  - Call
-  - Close
-  - ComputeChainHashV1
-  - Elem
-  - Format
-  - Get
   - ID
+  - NewExecutionContext
+  - ParseExecutionGraph
+  - PrincipalFrom
+  - cabinetService.GetWorkflow
+- name: runStep
+  kind: method
+  receiver: cabinetService
+  description: runStep resolves, validates and runs one workflow step, stores its
+    result in execCtx and returns its ProofTrace record. It sets *dispatched just
+    before handing the step to a module, the point after which the step may have had
+    side effects.
+  references: []
+  calls:
+  - Call
+  - Checksum
+  - Close
+  - Elem
+  - Get
   - In
   - Init
   - Interface
   - IsNil
   - Kind
-  - NewExecutionContext
   - NewHostInstance
   - Notify
   - NumIn
   - NumOut
   - Out
-  - ParseExecutionGraph
-  - PrincipalFrom
   - Process
-  - Set
   - Type
-  - UTC
+  - Workflow.ID
   - cabinetService.GetModule
-  - cabinetService.GetWorkflow
+  - executionContext.Get
+  - executionContext.Set
+- name: finishTrace
+  kind: method
+  receiver: cabinetService
+  description: 'finishTrace builds the v2 ProofTrace of a run (completed or failed),
+    signs its chain hash when a TraceSigner is configured, and records it. A signing
+    failure leaves Signature empty and is logged: the trace keeps its integrity, only
+    the proof of origin is missing.'
+  references:
+  - logrus.WithFields
+  - logrus.Fields
+  calls:
+  - ComputeChainHashV2
+  - Format
+  - Sign
+  - UTC
+  - Warn
+  - logrus.WithFields
+- name: failedRunError
+  kind: method
+  receiver: cabinetService
+  description: failedRunError records the trace of a run that failed after a step
+    had been dispatched (completed steps plus the failed one's name, status "failed")
+    and returns cause wrapped in an ExecutionFailedError that carries that trace and
+    its proof status.
+  references: []
+  calls: []
 - name: recordProof
   kind: method
   receiver: cabinetService

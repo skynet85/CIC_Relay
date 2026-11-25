@@ -31,6 +31,15 @@ objects:
   description: APIError represents a standardized error response for API consumers.
   implements: []
   references: []
+- name: ExecutionFailedError
+  kind: struct
+  description: ExecutionFailedError is returned by Setx when a step fails after the
+    run has started dispatching steps. Err is the cause (errors.Is/As see through
+    to it, so IsTimeout and the other helpers still apply); Trace is the recorded
+    trace of the failed run (status "failed", the completed steps, the failed step's
+    name) and Proof says whether it was persisted.
+  implements: []
+  references: []
 - name: IsInvalid
   kind: func
   description: IsInvalid checks if an error is an ErrInvalid validation or integrity
@@ -95,6 +104,19 @@ objects:
   references: []
   calls:
   - Error
+- name: Error
+  kind: method
+  receiver: ExecutionFailedError
+  description: Error returns the cause's message unchanged.
+  references: []
+  calls:
+  - Error
+- name: Unwrap
+  kind: method
+  receiver: ExecutionFailedError
+  description: Unwrap returns the cause.
+  references: []
+  calls: []
 - name: jsonMarshal
   kind: var
   description: jsonMarshal is a variable that holds the json.Marshal function. It

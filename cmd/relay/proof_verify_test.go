@@ -139,7 +139,7 @@ func TestVerifyProofArtifact_CommitRecord_PoseNotVerified_Warns(t *testing.T) {
 	r := VerifyProofArtifact(a)
 	assert.True(t, r.Valid)
 	require.NotEmpty(t, r.Warnings)
-	assert.Contains(t, r.Warnings[0], "pose_result")
+	assert.True(t, warningContains(r.Warnings, "pose_result"), "warnings: %v", r.Warnings)
 }
 
 func TestProofArtifactFromTrace(t *testing.T) {
@@ -180,4 +180,14 @@ func TestMarshalProofArtifact(t *testing.T) {
 	assert.Contains(t, s, "workflow_id")
 	assert.Contains(t, s, "chain_hash")
 	assert.Contains(t, s, "wf@1.0")
+}
+
+// warningContains reports whether any warning contains sub.
+func warningContains(warnings []string, sub string) bool {
+	for _, w := range warnings {
+		if strings.Contains(w, sub) {
+			return true
+		}
+	}
+	return false
 }

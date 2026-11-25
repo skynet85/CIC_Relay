@@ -1,0 +1,228 @@
+---
+package: cabinet
+description: ''
+tags:
+- test
+category: []
+used_in: []
+entrypoint: false
+related_nodes: []
+objects:
+- name: captureRecorder
+  kind: struct
+  description: captureRecorder is an ExecutionRecorder that keeps every trace it is
+    handed.
+  implements: []
+  references: []
+- name: fakeSigner
+  kind: struct
+  description: fakeSigner is a TraceSigner that returns a fixed signature (or error)
+    and keeps what it signed.
+  implements: []
+  references: []
+- name: Record
+  kind: method
+  receiver: captureRecorder
+  description: ''
+  references: []
+  calls: []
+- name: Sign
+  kind: method
+  receiver: fakeSigner
+  description: ''
+  references: []
+  calls: []
+- name: v2Trace
+  kind: func
+  description: ''
+  references: []
+  calls: []
+- name: TestComputeChainHashV2_BindsEveryField
+  kind: func
+  description: ''
+  references:
+  - require.Len
+  - assert.Equal
+  - assert.NotEqual
+  calls:
+  - ComputeChainHashV2
+  - assert.Equal
+  - assert.NotEqual
+  - require.Len
+- name: TestComputeChainHashV2_IgnoresNonInputs
+  kind: func
+  description: ''
+  references:
+  - assert.Equal
+  calls:
+  - ComputeChainHashV2
+  - assert.Equal
+- name: TestComputeChainHashV2_LengthPrefixIsUnambiguous
+  kind: func
+  description: ''
+  references:
+  - assert.NotEqual
+  - assert.Equal
+  calls:
+  - ComputeChainHashV1
+  - ComputeChainHashV2
+  - assert.Equal
+  - assert.NotEqual
+- name: TestComputeChainHash_DispatchesOnVersion
+  kind: func
+  description: ''
+  references:
+  - assert.Equal
+  - assert.Empty
+  calls:
+  - ComputeChainHash
+  - ComputeChainHashV1
+  - ComputeChainHashV2
+  - assert.Empty
+  - assert.Equal
+- name: newRunTestService
+  kind: func
+  description: newRunTestService builds a service with an "echo" module and a "boom"
+    module whose function fails with failErr, plus the given workflow steps.
+  references:
+  - require.NoError
+  calls:
+  - ID
+  - NewMemModuleStore
+  - NewMemWorkflowStore
+  - NewModuleDescriptor
+  - NewWorkflow
+  - Put
+  - require.NoError
+- name: TestSetx_FailedRun_IsRecordedWithCompletedSteps
+  kind: func
+  description: ''
+  references:
+  - require.Error
+  - assert.Nil
+  - assert.ErrorIs
+  - assert.Contains
+  - require.True
+  - require.NotNil
+  - assert.Equal
+  - require.Len
+  - assert.True
+  - assert.Same
+  calls:
+  - ComputeChainHashV2
+  - Error
+  - Setx
+  - assert.Contains
+  - assert.Equal
+  - assert.ErrorIs
+  - assert.Nil
+  - assert.Same
+  - assert.True
+  - require.Error
+  - require.Len
+  - require.NotNil
+  - require.True
+- name: TestSetx_FailedFirstStep_IsRecordedWithNoSteps
+  kind: func
+  description: ''
+  references:
+  - require.True
+  - assert.Empty
+  - assert.Equal
+  - assert.Len
+  calls:
+  - Setx
+  - assert.Empty
+  - assert.Equal
+  - assert.Len
+  - require.True
+- name: TestSetx_FailureBeforeDispatch_IsNotRecorded
+  kind: func
+  description: ''
+  references:
+  - require.Error
+  - assert.False
+  - assert.Empty
+  calls:
+  - Setx
+  - assert.Empty
+  - assert.False
+  - require.Error
+- name: TestSetx_FailedRun_KeepsErrorClassification
+  kind: func
+  description: ''
+  references:
+  - assert.True
+  calls:
+  - IsTimeout
+  - Setx
+  - assert.True
+- name: TestSetx_FailedRun_WithEvidenceRequired_ReturnsTheCause
+  kind: func
+  description: ''
+  references:
+  - assert.ErrorIs
+  - assert.False
+  - require.True
+  - assert.Equal
+  calls:
+  - IsEvidenceRequired
+  - Setx
+  - assert.Equal
+  - assert.ErrorIs
+  - assert.False
+  - require.True
+- name: TestSetx_SignsTheChainHash
+  kind: func
+  description: ''
+  references:
+  - require.NoError
+  - assert.Equal
+  - require.Len
+  calls:
+  - Setx
+  - assert.Equal
+  - require.Len
+  - require.NoError
+- name: TestSetx_SignsFailedRuns
+  kind: func
+  description: ''
+  references:
+  - require.True
+  - assert.Equal
+  calls:
+  - Setx
+  - assert.Equal
+  - require.True
+- name: TestSetx_SigningFailure_LeavesTraceUnsigned
+  kind: func
+  description: ''
+  references:
+  - require.NoError
+  - assert.Empty
+  - assert.Equal
+  calls:
+  - ComputeChainHashV2
+  - Setx
+  - assert.Empty
+  - assert.Equal
+  - require.NoError
+- name: TestWithTraceSigner_SetsSigner
+  kind: func
+  description: ''
+  references:
+  - assert.Same
+  calls:
+  - WithTraceSigner
+  - assert.Same
+- name: TestExecutionFailedError_ErrorAndUnwrap
+  kind: func
+  description: ''
+  references:
+  - assert.Equal
+  - assert.Same
+  calls:
+  - ExecutionFailedError.Error
+  - ExecutionFailedError.Unwrap
+  - assert.Equal
+  - assert.Same

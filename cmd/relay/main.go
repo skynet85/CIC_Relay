@@ -181,6 +181,9 @@ type relayServer struct {
 	// apiToken is CIC_API_TOKEN: the bearer token of the authenticated routes. Empty
 	// means not configured, and those routes refuse every request.
 	apiToken string
+	// traceVerifier checks ProofTrace signatures for /v1/proof/verify (the relay's Vault
+	// Transit key). Nil means no key is configured: artifacts verify for integrity only.
+	traceVerifier cabinet.TraceVerifier
 }
 
 // emitTrace emits a TraceFrame if a TraceSink is configured.
@@ -384,6 +387,12 @@ func (s *relayServer) setHandler(w http.ResponseWriter, r *http.Request) {
 	// options.priority valid) before delegating to Cabinet.Setx().
 	resp, err := cabinet.NewAPI(s.api).Set(r.Context(), &payload)
 	if err != nil {
+		var failed *cabinet.ExecutionFailedError
+		if errors.As(err, &failed) && failed.Trace != nil {
+			// The run failed after steps had run: its trace was recorded as evidence.
+			chainAnchor = failed.Trace.ChainHash
+			logEntry = logEntry.WithFields(logrus.Fields{"chain_hash": failed.Trace.ChainHash, "failed_step": failed.Trace.FailedStep, "proof_persisted": failed.Proof != nil && failed.Proof.Persisted})
+		}
 		if cabinet.IsTimeout(err) {
 			traceStatus = "timeout"
 			logEntry.WithField("outcome", "timeout").WithError(err).Warn("Workflow execution timed out")
@@ -512,11 +521,19 @@ func loadSecretsFromVault(logger *logrus.Logger) *VaultSecrets {
 	}
 }
 
-// evidenceRequiredFromEnv reads CIC_EVIDENCE_REQUIRED. Unset or empty means false; only
+// evidenceRequiredFromEnv reads CIC_EVIDENCE_REQUIRED. Unset or empty means false, except with
+// CIC_TRUST_MODE=prod, where it means true and an explicit "false" is a start-up error. Only
 // "true" and "false" are accepted, so a typo cannot silently switch a required mode off.
 func evidenceRequiredFromEnv() (bool, error) {
+	prod := strings.TrimSpace(os.Getenv("CIC_TRUST_MODE")) == TrustModeProd
 	switch v := strings.TrimSpace(os.Getenv("CIC_EVIDENCE_REQUIRED")); v {
-	case "", "false":
+	case "":
+		// In prod a run without persisted evidence is not a success: required unless said otherwise.
+		return prod, nil
+	case "false":
+		if prod {
+			return false, fmt.Errorf("CIC_EVIDENCE_REQUIRED=false is not allowed with CIC_TRUST_MODE=prod: an auditable relay cannot drop its evidence")
+		}
 		return false, nil
 	case "true":
 		return true, nil
@@ -704,12 +721,18 @@ func main() {
 
 	// Build artifact signer for cic.artifact.sign — uses the same Vault key as the recorder.
 	// Nil if Vault is not configured; cic_sign will be "unavailable" in that case (non-fatal).
+	// The same key signs every ProofTrace chain hash (cabinet.WithTraceSigner) and verifies
+	// them on /v1/proof/verify, so a trace's origin can be checked, not only its integrity.
 	var artifactSigner schemacompile.ArtifactSigner
+	var traceSigner cabinet.TraceSigner
+	var traceVerifier cabinet.TraceVerifier
 	if secrets != nil {
-		if cs, csErr := crypto.NewVaultCryptoService(secrets.MountPath, secrets.KeyName); csErr == nil {
+		if cs, csErr := newVaultCryptoSvc(secrets.MountPath, secrets.KeyName); csErr == nil {
 			artifactSigner = cs
+			traceSigner = cs
+			traceVerifier = cs
 		} else {
-			logger.WithError(csErr).Warn("cic.artifact.sign: Vault init failed — cic_sign will be unavailable")
+			logger.WithError(csErr).Warn("cic.artifact.sign: Vault init failed — cic_sign and ProofTrace signatures will be unavailable")
 		}
 	}
 
@@ -754,7 +777,7 @@ func main() {
 	metricSink := obs.NewMultiMetricSink(logrusSink, promSink)
 	gitOps.SetObsSinks(logrusSink, metricSink) // relay.git.op_duration_ms + WARN logok
 	obsOpt := cabinet.WithObsSinks(logrusSink, metricSink)
-	cabinetSvc, err := cabinet.NewCabinetService(context.Background(), schemaStore, moduleStore, workflowStore, wasmConfig, recorderOpt, cabinet.WithEvidenceRequired(evidenceRequired), cabinet.WithProtectedModules(protectedModuleIDs...), obsOpt)
+	cabinetSvc, err := cabinet.NewCabinetService(context.Background(), schemaStore, moduleStore, workflowStore, wasmConfig, recorderOpt, cabinet.WithEvidenceRequired(evidenceRequired), cabinet.WithProtectedModules(protectedModuleIDs...), cabinet.WithTraceSigner(traceSigner), obsOpt)
 	if err != nil {
 		logger.WithField("error", err).Fatal("FATAL: Failed to create cabinet service")
 	}
@@ -838,14 +861,15 @@ func main() {
 		logger.Warn("CIC_API_TOKEN is not set: /v1/schema/compile refuses every request until it is")
 	}
 	server := &relayServer{
-		apiToken:   apiToken,
-		api:        cabinetSvc,
-		config:     cfg,
-		logger:     logger,
-		traceSink:  logrusSink,
-		logSink:    logrusSink,
-		metricSink: metricSink,
-		promSink:   promSink,
+		apiToken:      apiToken,
+		traceVerifier: traceVerifier,
+		api:           cabinetSvc,
+		config:        cfg,
+		logger:        logger,
+		traceSink:     logrusSink,
+		logSink:       logrusSink,
+		metricSink:    metricSink,
+		promSink:      promSink,
 		obsResource: obs.Resource{
 			RelayID:   instanceID,
 			Component: "cmd/relay",
