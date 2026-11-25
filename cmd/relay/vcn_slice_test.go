@@ -233,7 +233,8 @@ func TestVCNSlice_EvidenceChainVerifiesAndMatchesTheExpectedClaims(t *testing.T)
 				t.Fatalf("evidence: %v", err)
 			}
 			res := VerifyProofArtifact(a)
-			if !res.Valid || len(res.Errors) != 0 || len(res.Warnings) != 0 {
+			// The slice's evidence is a v1 chain: its one expected warning says so.
+			if !res.Valid || len(res.Errors) != 0 || len(res.Warnings) != 1 || !strings.HasPrefix(res.Warnings[0], "chain_version v1") {
 				t.Fatalf("VerifyProofArtifact: %+v", res)
 			}
 			if !vcnSidecarBound(t, a, sc) {

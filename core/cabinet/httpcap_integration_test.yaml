@@ -28,7 +28,7 @@ objects:
   - assert.NotEmpty
   - assert.NotContains
   calls:
-  - ComputeChainHashV1
+  - ComputeChainHashV2
   - ID
   - NewMemModuleStore
   - NewMemWorkflowStore

@@ -1,20 +1,49 @@
 package cabinet
 
 import (
+	"context"
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/hex"
+	"strconv"
 	"strings"
 
 	"centralrelay/pkg/canonicaljson"
 )
 
 // ProofTraceStep records the cryptographic fingerprint of a single workflow step.
+//
+// ModuleChecksum is the content checksum of the module that ran the step (for a WASM
+// module it covers the canonical WASM binary). Module alone is the "name@version"
+// label, under which two different binaries can be registered; the checksum names
+// the artifact. It is bound by the v2 chain hash and ignored by v1.
 type ProofTraceStep struct {
-	Name       string `json:"name"`
-	Module     string `json:"module"`
-	InputHash  string `json:"input_hash"`
-	OutputHash string `json:"output_hash"`
+	Name           string `json:"name"`
+	Module         string `json:"module"`
+	ModuleChecksum string `json:"module_checksum,omitempty"`
+	InputHash      string `json:"input_hash"`
+	OutputHash     string `json:"output_hash"`
 }
+
+// Chain format versions carried in ProofTrace.ChainVersion. An empty version means v1.
+const (
+	// ChainVersionV1 is the original format (ComputeChainHashV1): source, workflow and per-step
+	// name/module/input/output, NUL-separated. It binds neither the module binary, the timestamp
+	// nor the outcome of the run.
+	ChainVersionV1 = "v1"
+	// ChainVersionV2 is ComputeChainHashV2: length-prefixed fields that also bind the module
+	// checksum of every step, the timestamp and the outcome (status, failed step).
+	ChainVersionV2 = "v2"
+)
+
+// Outcomes of an execution, carried in ProofTrace.Status (bound by the v2 chain hash).
+const (
+	// TraceStatusCompleted: every step ran.
+	TraceStatusCompleted = "completed"
+	// TraceStatusFailed: a step failed after the run had started; Steps holds the steps that
+	// completed and FailedStep names the one that did not. Earlier steps may have had side effects.
+	TraceStatusFailed = "failed"
+)
 
 // ProofTrace is the immutable audit record of a completed workflow execution.
 // Every field is deterministic and canonicalizable; no clock or RNG side-effects
@@ -23,12 +52,32 @@ type ProofTraceStep struct {
 // SourceDigest anchors the chain to the source revision. It is injected by the caller
 // (e.g. git HEAD commit hash or BuildID) and becomes the first input of ChainHash,
 // making the hash-chain continuous from source to output.
+//
+// ChainVersion names the chain hash format (empty = v1). Status and FailedStep record the
+// outcome: a failed run is recorded too, with the steps that completed. Signature, when
+// present, is the relay's signature over ChainHash (TraceSigner); it is not part of the
+// hash, and it is what turns a well-formed trace into one whose origin can be checked.
 type ProofTrace struct {
 	WorkflowID   string           `json:"workflow_id"`
 	SourceDigest string           `json:"source_digest,omitempty"`
+	ChainVersion string           `json:"chain_version,omitempty"`
+	Status       string           `json:"status,omitempty"`
+	FailedStep   string           `json:"failed_step,omitempty"`
 	Steps        []ProofTraceStep `json:"steps"`
 	ChainHash    string           `json:"chain_hash"`
 	Timestamp    string           `json:"timestamp"`
+	Signature    string           `json:"signature,omitempty"`
+}
+
+// TraceSigner signs the chain hash of a ProofTrace with the relay's key (for example a
+// Vault Transit key: crypto.CryptoService satisfies it). The key never leaves the backend.
+type TraceSigner interface {
+	Sign(ctx context.Context, data []byte) (string, error)
+}
+
+// TraceVerifier checks a ProofTrace signature against the relay's key.
+type TraceVerifier interface {
+	Verify(ctx context.Context, data []byte, signature string) (bool, error)
 }
 
 // ProofTraceStepFromActuation projects an http-executor actuation's non-secret
@@ -130,4 +179,53 @@ func ComputeChainHashV1(workflowID, sourceDigest string, steps []ProofTraceStep)
 	}
 	sum := sha256.Sum256([]byte(sb.String()))
 	return hex.EncodeToString(sum[:])
+}
+
+// ComputeChainHashV2 returns the v2 chain hash of t: SHA-256 over
+//
+//	"CICCHAINv2" ‖ f(source_digest) ‖ f(workflow_id) ‖ f(status) ‖ f(failed_step) ‖ f(timestamp) ‖ f(len(steps))
+//	‖ per step: f(name) ‖ f(module) ‖ f(module_checksum) ‖ f(input_hash) ‖ f(output_hash)
+//
+// where f(x) is the 8-byte big-endian length of x followed by x. Length prefixes make the
+// encoding unambiguous for any field content (v1's NUL separators are ambiguous when a field
+// itself contains a NUL byte). Compared with v1 it also binds the module checksum of every
+// step, the timestamp and the outcome of the run. ChainHash, ChainVersion and Signature are
+// not inputs.
+func ComputeChainHashV2(t *ProofTrace) string {
+	h := sha256.New()
+	h.Write([]byte("CICCHAINv2"))
+	field := func(s string) {
+		var n [8]byte
+		binary.BigEndian.PutUint64(n[:], uint64(len(s)))
+		h.Write(n[:])
+		h.Write([]byte(s))
+	}
+	field(t.SourceDigest)
+	field(t.WorkflowID)
+	field(t.Status)
+	field(t.FailedStep)
+	field(t.Timestamp)
+	field(strconv.Itoa(len(t.Steps)))
+	for _, s := range t.Steps {
+		field(s.Name)
+		field(s.Module)
+		field(s.ModuleChecksum)
+		field(s.InputHash)
+		field(s.OutputHash)
+	}
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+// ComputeChainHash returns the chain hash of t in the format its ChainVersion names: v2
+// (ComputeChainHashV2) for "v2", v1 (ComputeChainHashV1) for "" and "v1". It returns "" for an
+// unknown version, which never equals a declared hash, so a verifier rejects it.
+func ComputeChainHash(t *ProofTrace) string {
+	switch t.ChainVersion {
+	case ChainVersionV2:
+		return ComputeChainHashV2(t)
+	case "", ChainVersionV1:
+		return ComputeChainHashV1(t.WorkflowID, t.SourceDigest, t.Steps)
+	default:
+		return ""
+	}
 }

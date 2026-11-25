@@ -463,8 +463,16 @@ func TestSetx_ProofTrace(t *testing.T) {
 	assert.NotEmpty(t, step.OutputHash)
 	assert.NotEmpty(t, trace.ChainHash)
 
-	// ChainHash must be reproducible from workflowID + sourceDigest + steps.
-	assert.Equal(t, ComputeChainHashV1(trace.WorkflowID, "", trace.Steps), trace.ChainHash)
+	// The trace is v2: it records the outcome and binds the module binary.
+	assert.Equal(t, ChainVersionV2, trace.ChainVersion)
+	assert.Equal(t, TraceStatusCompleted, trace.Status)
+	assert.Empty(t, trace.FailedStep)
+	assert.Equal(t, mod.Checksum(), step.ModuleChecksum)
+	assert.NotEmpty(t, step.ModuleChecksum)
+
+	// ChainHash must be reproducible from the trace itself.
+	assert.Equal(t, ComputeChainHashV2(trace), trace.ChainHash)
+	assert.Equal(t, ComputeChainHash(trace), trace.ChainHash)
 
 	// Determinism: same input → same hashes.
 	resp2, err := svc.Setx(ctx, payload)

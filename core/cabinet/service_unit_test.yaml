@@ -144,14 +144,18 @@ objects:
   - assert.Equal
   - require.Len
   - assert.NotEmpty
+  - assert.Empty
   calls:
-  - ComputeChainHashV1
+  - Checksum
+  - ComputeChainHash
+  - ComputeChainHashV2
   - ID
   - NewMemModuleStore
   - NewMemWorkflowStore
   - NewModuleDescriptor
   - NewWorkflow
   - Put
+  - assert.Empty
   - assert.Equal
   - assert.NotEmpty
   - cabinetService.Setx

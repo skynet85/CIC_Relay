@@ -16,12 +16,15 @@ type ProofVerifyRequest struct {
 
 // ProofVerifyResponse is the response body for POST /v1/proof/verify.
 type ProofVerifyResponse struct {
-	Valid    bool     `json:"valid"`
-	Errors   []string `json:"errors,omitempty"`
-	Warnings []string `json:"warnings,omitempty"`
+	Valid     bool     `json:"valid"`
+	Authentic bool     `json:"authentic"`
+	Errors    []string `json:"errors,omitempty"`
+	Warnings  []string `json:"warnings,omitempty"`
 }
 
-// proofVerifyHandler handles POST /v1/proof/verify requests by validating a ProofArtifact against the schema contract.
+// proofVerifyHandler handles POST /v1/proof/verify requests: it checks a ProofArtifact against the
+// schema contract and recomputes its chain hash (valid), then checks its signature against the
+// relay's key (authentic).
 func (s *relayServer) proofVerifyHandler(w http.ResponseWriter, r *http.Request) {
 	reqID := uuid.New().String()
 	logEntry := s.logger.WithFields(logrus.Fields{
@@ -60,9 +63,9 @@ func (s *relayServer) proofVerifyHandler(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	result := VerifyProofArtifact(req.ProofArtifact)
+	result := VerifyProofAuthenticity(r.Context(), s.traceVerifier, req.ProofArtifact, VerifyProofArtifact(req.ProofArtifact))
 
-	logEntry.WithField("outcome", "success").WithField("valid", result.Valid).Info("Proof verify completed")
+	logEntry.WithFields(logrus.Fields{"outcome": "success", "valid": result.Valid, "authentic": result.Authentic}).Info("Proof verify completed")
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(ProofVerifyResponse(result))

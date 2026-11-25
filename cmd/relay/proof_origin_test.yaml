@@ -1,0 +1,161 @@
+---
+package: main
+description: ''
+tags:
+- interface
+- test
+category: []
+used_in: []
+entrypoint: true
+related_nodes: []
+objects:
+- name: fakeVerifier
+  kind: struct
+  description: fakeVerifier is a cabinet.TraceVerifier with a fixed answer; it keeps
+    what it was asked.
+  implements: []
+  references: []
+- name: Verify
+  kind: method
+  receiver: fakeVerifier
+  description: ''
+  references: []
+  calls: []
+- name: v2Artifact
+  kind: func
+  description: v2Artifact returns a well-formed, signed v2 ProofArtifact.
+  references:
+  - cabinet.ProofTrace
+  - cabinet.ChainVersionV2
+  - cabinet.TraceStatusCompleted
+  - cabinet.ProofTraceStep
+  - cabinet.ComputeChainHashV2
+  calls:
+  - ProofArtifactFromTrace
+  - cabinet.ComputeChainHashV2
+- name: TestVerifyProofArtifact_V2_IsValidWithoutTheV1Warning
+  kind: func
+  description: ''
+  references:
+  - assert.True
+  - assert.Empty
+  - assert.False
+  calls:
+  - VerifyProofArtifact
+  - assert.Empty
+  - assert.False
+  - assert.True
+- name: TestVerifyProofArtifact_V2_BindsTimestampAndModuleChecksum
+  kind: func
+  description: ''
+  references:
+  - assert.False
+  calls:
+  - VerifyProofArtifact
+  - assert.False
+- name: TestVerifyProofArtifact_V1_WarnsWhatItDoesNotBind
+  kind: func
+  description: ''
+  references:
+  - assert.True
+  - cabinet.ChainVersionV1
+  calls:
+  - VerifyProofArtifact
+  - assert.True
+- name: TestVerifyProofArtifact_UnsupportedVersion
+  kind: func
+  description: ''
+  references:
+  - assert.False
+  - assert.True
+  calls:
+  - VerifyProofArtifact
+  - assert.False
+  - assert.True
+- name: TestVerifyProofArtifact_Outcome
+  kind: func
+  description: ''
+  references:
+  - cabinet.TraceStatusFailed
+  - cabinet.ComputeChainHashV2
+  - assert.True
+  - assert.False
+  calls:
+  - ProofArtifactFromTrace
+  - VerifyProofArtifact
+  - assert.False
+  - assert.True
+  - cabinet.ComputeChainHashV2
+- name: TestVerifyProofAuthenticity
+  kind: func
+  description: ''
+  references:
+  - assert.True
+  - assert.Equal
+  - assert.False
+  - assert.Nil
+  calls:
+  - VerifyProofArtifact
+  - VerifyProofAuthenticity
+  - assert.Equal
+  - assert.False
+  - assert.Nil
+  - assert.True
+- name: TestProofArtifact_RoundTripsThroughTrace
+  kind: func
+  description: ''
+  references:
+  - assert.Equal
+  calls:
+  - ProofArtifactFromTrace
+  - assert.Equal
+- name: TestProofVerifyHandler_ReportsAuthenticity
+  kind: func
+  description: ''
+  references:
+  - require.NoError
+  - cabinet.TraceVerifier
+  - require.Equal
+  - assert.True
+  - assert.Equal
+  calls:
+  - Bytes
+  - assert.Equal
+  - assert.True
+  - require.Equal
+  - require.NoError
+- name: TestEvidenceRequiredFromEnv_Prod
+  kind: func
+  description: ''
+  references:
+  - require.NoError
+  - assert.True
+  - assert.Error
+  - assert.False
+  calls:
+  - assert.Error
+  - assert.False
+  - assert.True
+  - require.NoError
+- name: TestSetHandler_FailedRun_AnchorsTheTraceToItsChain
+  kind: func
+  description: ''
+  references:
+  - cabinet.ExecutionFailedError
+  - cabinet.ProofTrace
+  - cabinet.ProofStatus
+  - mock.Anything
+  - cabinet.Workflow
+  - logrus.New
+  - obs.CaptureSink
+  - assert.Equal
+  - require.Len
+  - assert.Contains
+  calls:
+  - Return
+  - SetOutput
+  - assert.Contains
+  - assert.Equal
+  - logrus.New
+  - mockCabinetService.On
+  - require.Len

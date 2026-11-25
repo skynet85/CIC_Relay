@@ -157,10 +157,8 @@ objects:
   references:
   - assert.True
   - require.NotEmpty
-  - assert.Contains
   calls:
   - VerifyProofArtifact
-  - assert.Contains
   - assert.True
   - require.NotEmpty
 - name: TestProofArtifactFromTrace
@@ -194,6 +192,11 @@ objects:
   - MarshalProofArtifact
   - assert.Contains
   - require.NoError
+- name: warningContains
+  kind: func
+  description: warningContains reports whether any warning contains sub.
+  references: []
+  calls: []
 - name: testSteps
   kind: var
   description: ''

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 
@@ -12,19 +13,24 @@ import (
 type ProofArtifact struct {
 	WorkflowID   string               `json:"workflow_id"`
 	SourceDigest string               `json:"source_digest"`
+	ChainVersion string               `json:"chain_version,omitempty"`
+	Status       string               `json:"status,omitempty"`
+	FailedStep   string               `json:"failed_step,omitempty"`
 	ChainHash    string               `json:"chain_hash"`
 	Steps        []ProofArtifactStep  `json:"steps"`
 	Timestamp    string               `json:"timestamp"`
+	Signature    string               `json:"signature,omitempty"`
 	PoSEResult   string               `json:"pose_result,omitempty"`
 	CommitRecord *ProofArtifactCommit `json:"commit_record,omitempty"`
 }
 
 // ProofArtifactStep mirrors cabinet.ProofTraceStep for the verifier.
 type ProofArtifactStep struct {
-	Name       string `json:"name"`
-	Module     string `json:"module"`
-	InputHash  string `json:"input_hash"`
-	OutputHash string `json:"output_hash"`
+	Name           string `json:"name"`
+	Module         string `json:"module"`
+	ModuleChecksum string `json:"module_checksum,omitempty"`
+	InputHash      string `json:"input_hash"`
+	OutputHash     string `json:"output_hash"`
 }
 
 // ProofArtifactCommit holds the state commit record appended after PoSE verification.
@@ -35,11 +41,16 @@ type ProofArtifactCommit struct {
 	Actor     string `json:"actor,omitempty"`
 }
 
-// VerifyResult is the output of VerifyProofArtifact.
+// VerifyResult is the output of VerifyProofArtifact (and of the authenticity check on top of it).
+//
+// Valid means the artifact is well formed and its chain hash recomputes: integrity. It does
+// not say who produced it — anyone can compute a SHA-256 chain. Authentic means, in addition,
+// that the artifact's signature over the chain hash verifies against the relay's key.
 type VerifyResult struct {
-	Valid    bool     `json:"valid"`
-	Errors   []string `json:"errors,omitempty"`
-	Warnings []string `json:"warnings,omitempty"`
+	Valid     bool     `json:"valid"`
+	Authentic bool     `json:"authentic"`
+	Errors    []string `json:"errors,omitempty"`
+	Warnings  []string `json:"warnings,omitempty"`
 }
 
 // VerifyProofArtifact validates a ProofArtifact against the proof_artifact@1.0 schema contract.
@@ -71,23 +82,36 @@ func VerifyProofArtifact(a *ProofArtifact) VerifyResult {
 		warns = append(warns, "source_digest is empty or unknown — chain is not anchored to a source revision")
 	}
 
-	// 2. chain_hash recomputation
+	// 2. chain_hash recomputation, in the format the artifact declares.
+	switch a.ChainVersion {
+	case "", cabinet.ChainVersionV1:
+		warns = append(warns, "chain_version v1: the module binary, the timestamp and the outcome are not bound by the chain hash")
+	case cabinet.ChainVersionV2:
+	default:
+		errs = append(errs, fmt.Sprintf("chain_version %q is not supported (v1, v2)", a.ChainVersion))
+	}
 	if a.WorkflowID != "" && a.ChainHash != "" {
-		steps := make([]cabinet.ProofTraceStep, len(a.Steps))
-		for i, s := range a.Steps {
-			steps[i] = cabinet.ProofTraceStep{
-				Name:       s.Name,
-				Module:     s.Module,
-				InputHash:  s.InputHash,
-				OutputHash: s.OutputHash,
-			}
-		}
-		expected := cabinet.ComputeChainHashV1(a.WorkflowID, a.SourceDigest, steps)
+		expected := cabinet.ComputeChainHash(a.toTrace())
 		if expected != a.ChainHash {
 			errs = append(errs, fmt.Sprintf(
 				"chain_hash mismatch: declared=%s recomputed=%s", a.ChainHash, expected,
 			))
 		}
+	}
+
+	// 2b. outcome
+	switch a.Status {
+	case "", cabinet.TraceStatusCompleted:
+		if a.FailedStep != "" {
+			errs = append(errs, "failed_step is set but status is not \"failed\"")
+		}
+	case cabinet.TraceStatusFailed:
+		if a.FailedStep == "" {
+			errs = append(errs, "status \"failed\" requires failed_step")
+		}
+		warns = append(warns, "status is \"failed\": the run did not complete; the steps listed did run")
+	default:
+		errs = append(errs, fmt.Sprintf("status must be completed | failed, got %q", a.Status))
 	}
 
 	// 3. Per-step validation
@@ -143,19 +167,81 @@ func ProofArtifactFromTrace(t *cabinet.ProofTrace) *ProofArtifact {
 	steps := make([]ProofArtifactStep, len(t.Steps))
 	for i, s := range t.Steps {
 		steps[i] = ProofArtifactStep{
-			Name:       s.Name,
-			Module:     s.Module,
-			InputHash:  s.InputHash,
-			OutputHash: s.OutputHash,
+			Name:           s.Name,
+			Module:         s.Module,
+			ModuleChecksum: s.ModuleChecksum,
+			InputHash:      s.InputHash,
+			OutputHash:     s.OutputHash,
 		}
 	}
 	return &ProofArtifact{
 		WorkflowID:   t.WorkflowID,
 		SourceDigest: t.SourceDigest,
+		ChainVersion: t.ChainVersion,
+		Status:       t.Status,
+		FailedStep:   t.FailedStep,
 		ChainHash:    t.ChainHash,
 		Steps:        steps,
 		Timestamp:    t.Timestamp,
+		Signature:    t.Signature,
 	}
+}
+
+// toTrace is the inverse of ProofArtifactFromTrace: the cabinet.ProofTrace the artifact describes.
+func (a *ProofArtifact) toTrace() *cabinet.ProofTrace {
+	steps := make([]cabinet.ProofTraceStep, len(a.Steps))
+	for i, s := range a.Steps {
+		steps[i] = cabinet.ProofTraceStep{
+			Name:           s.Name,
+			Module:         s.Module,
+			ModuleChecksum: s.ModuleChecksum,
+			InputHash:      s.InputHash,
+			OutputHash:     s.OutputHash,
+		}
+	}
+	return &cabinet.ProofTrace{
+		WorkflowID:   a.WorkflowID,
+		SourceDigest: a.SourceDigest,
+		ChainVersion: a.ChainVersion,
+		Status:       a.Status,
+		FailedStep:   a.FailedStep,
+		Steps:        steps,
+		ChainHash:    a.ChainHash,
+		Timestamp:    a.Timestamp,
+		Signature:    a.Signature,
+	}
+}
+
+// VerifyProofAuthenticity adds the origin check to an integrity result r of a: it sets
+// r.Authentic when a carries a signature over its chain hash that verifies against the relay's
+// key (verifier). A signature that does not verify makes the artifact invalid: the chain was
+// altered or was not signed by this relay. An unsigned artifact, a relay with no verifier, or a
+// verifier backend error leave Authentic false with a warning: integrity only, origin not proven.
+func VerifyProofAuthenticity(ctx context.Context, verifier cabinet.TraceVerifier, a *ProofArtifact, r VerifyResult) VerifyResult {
+	r.Authentic = false
+	if !r.Valid {
+		return r
+	}
+	if a.Signature == "" {
+		r.Warnings = append(r.Warnings, "unsigned: integrity verified, origin not proven")
+		return r
+	}
+	if verifier == nil {
+		r.Warnings = append(r.Warnings, "signature present but this relay has no verification key configured: origin not checked")
+		return r
+	}
+	ok, err := verifier.Verify(ctx, []byte(a.ChainHash), a.Signature)
+	if err != nil {
+		r.Warnings = append(r.Warnings, "signature could not be checked (verification backend error): origin not proven")
+		return r
+	}
+	if !ok {
+		r.Valid = false
+		r.Errors = append(r.Errors, "signature does not verify against the relay key")
+		return r
+	}
+	r.Authentic = true
+	return r
 }
 
 // MarshalProofArtifact serializes a ProofArtifact to canonical JSON format for transport or storage.

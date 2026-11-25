@@ -127,3 +127,19 @@ func NewAPIError(err error) *APIError {
 		Message: err.Error(),
 	}
 }
+
+// ExecutionFailedError is returned by Setx when a step fails after the run has started
+// dispatching steps. Err is the cause (errors.Is/As see through to it, so IsTimeout and the
+// other helpers still apply); Trace is the recorded trace of the failed run (status "failed",
+// the completed steps, the failed step's name) and Proof says whether it was persisted.
+type ExecutionFailedError struct {
+	Err   error
+	Trace *ProofTrace
+	Proof *ProofStatus
+}
+
+// Error returns the cause's message unchanged.
+func (e *ExecutionFailedError) Error() string { return e.Err.Error() }
+
+// Unwrap returns the cause.
+func (e *ExecutionFailedError) Unwrap() error { return e.Err }
