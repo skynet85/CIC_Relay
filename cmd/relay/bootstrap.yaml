@@ -65,7 +65,8 @@ objects:
   - cabinet.VerifyOptions
   - cabinet.VerifyCertificateChain
   - schemacompile.NewAssertSourceFunc
-  - schemacompile.BuildSchema
+  - schemacompile.NewStrictAssertSourceFunc
+  - schemacompile.NewBuildSchemaFunc
   - schemacompile.NewSignArtifactFunc
   - cabinet.NewWorkflow
   - cabinet.WorkflowIdentity
@@ -89,7 +90,9 @@ objects:
   - cabinet.VerifyCertificateChain
   - logrus.Info
   - schemacompile.NewAssertSourceFunc
+  - schemacompile.NewBuildSchemaFunc
   - schemacompile.NewSignArtifactFunc
+  - schemacompile.NewStrictAssertSourceFunc
   - schemapipeline.PipelineConfig.NewReleaseFunc
   - schemapipeline.PipelineConfig.NewRepoBuildFunc
   - schemapipeline.PipelineConfig.NewStartFunc

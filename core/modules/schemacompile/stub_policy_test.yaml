@@ -1,0 +1,95 @@
+---
+package: schemacompile_test
+description: ''
+tags:
+- schema
+- test
+category: []
+used_in: []
+entrypoint: false
+related_nodes: []
+objects:
+- name: TestAssertSource_StubMode_IsMarkedAsNoAssertion
+  kind: func
+  description: ''
+  references:
+  - schemacompile.NewAssertSourceFunc
+  - require.NoError
+  - assert.Equal
+  - schemacompile.AssertionNone
+  - schemacompile.AssertSource
+  calls:
+  - assert.Equal
+  - require.NoError
+  - schemacompile.AssertSource
+  - schemacompile.NewAssertSourceFunc
+- name: TestStrictAssertSource_RejectsMissingAssertion
+  kind: func
+  description: ''
+  references:
+  - schemacompile.NewStrictAssertSourceFunc
+  - require.Error
+  - assert.Contains
+  calls:
+  - Error
+  - assert.Contains
+  - require.Error
+  - schemacompile.NewStrictAssertSourceFunc
+- name: TestStrictAssertSource_AcceptsAnAssertion
+  kind: func
+  description: ''
+  references:
+  - schemacompile.NewStrictAssertSourceFunc
+  - require.NoError
+  - assert.Equal
+  - assert.NotContains
+  calls:
+  - assert.Equal
+  - assert.NotContains
+  - require.NoError
+  - schemacompile.NewStrictAssertSourceFunc
+- name: TestBuildSchema_StubOutputIsMarked
+  kind: func
+  description: ''
+  references:
+  - schemacompile.BuildSchema
+  - require.NoError
+  - assert.Equal
+  calls:
+  - assert.Equal
+  - require.NoError
+  - schemacompile.BuildSchema
+- name: TestNewBuildSchemaFunc
+  kind: func
+  description: ''
+  references:
+  - schemacompile.NewBuildSchemaFunc
+  - require.Error
+  - assert.Contains
+  - require.NoError
+  - assert.Equal
+  - assert.NotContains
+  calls:
+  - Error
+  - assert.Contains
+  - assert.Equal
+  - assert.NotContains
+  - require.Error
+  - require.NoError
+  - schemacompile.NewBuildSchemaFunc
+- name: TestSignArtifact_CarriesStubAndSourceProvenance
+  kind: func
+  description: ''
+  references:
+  - merkle.BuildContext
+  - schemacompile.NewSignArtifactFunc
+  - require.NoError
+  - assert.Equal
+  - schemacompile.SourceProvenanceRelay
+  - schemacompile.SourceProvenanceRepository
+  - assert.NotContains
+  calls:
+  - assert.Equal
+  - assert.NotContains
+  - require.NoError
+  - schemacompile.NewSignArtifactFunc

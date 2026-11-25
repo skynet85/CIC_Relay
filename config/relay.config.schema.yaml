@@ -8,8 +8,9 @@ config:
   name: relay.config
   description: >
     CIC Relay startup configuration schema.
-    Used for dogfooding: the relay validates its own config using the cabinet
-    schema engine at startup. All fields correspond to CIC_* environment variables.
+    Describes the CIC_* environment variables. The entries below are documentation,
+    not machine-checked rules: the relay enforces the limits with explicit range
+    checks (validateConfig); the cabinet "$schema" check matches labels only.
   stateRequirement:
     # Core limits (all integer/duration values must satisfy minimum constraints)
     CIC_MAX_JSON_INPUT_SIZE: "integer, bytes, min 1, default 4194304 (4 MB)"

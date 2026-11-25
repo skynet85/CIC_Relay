@@ -1,0 +1,66 @@
+---
+package: main
+description: ''
+tags:
+- test
+category: []
+used_in: []
+entrypoint: true
+related_nodes: []
+objects:
+- name: runCompileWithoutAssertion
+  kind: func
+  description: runCompileWithoutAssertion registers the native components for trustMode
+    and runs cic.schema.compile with a bare schema/version and no source_assertion.
+  references:
+  - cabinet.SetResponse
+  - cabinet.NewCabinetService
+  - cabinet.NewMemSchemaStore
+  - cabinet.NewMemModuleStore
+  - cabinet.NewMemWorkflowStore
+  - cabinet.WasmManagerConfig
+  - require.NoError
+  - merkle.BuildContext
+  - cabinet.SetPayload
+  calls:
+  - Close
+  - Setx
+  - cabinet.NewCabinetService
+  - cabinet.NewMemModuleStore
+  - cabinet.NewMemSchemaStore
+  - cabinet.NewMemWorkflowStore
+  - require.NoError
+- name: TestCompile_Prod_RefusesTheStubPath
+  kind: func
+  description: ''
+  references:
+  - require.Error
+  - assert.Nil
+  - assert.Contains
+  calls:
+  - Error
+  - assert.Contains
+  - assert.Nil
+  - require.Error
+- name: TestCompile_Dev_StubIsMarkedEndToEnd
+  kind: func
+  description: ''
+  references:
+  - require.NoError
+  - require.True
+  - assert.Equal
+  - schemacompile.SourceProvenanceRelay
+  - schemacompile.AssertionNone
+  calls:
+  - assert.Equal
+  - require.NoError
+  - require.True
+- name: TestBootstrapTrust_RecordsTheTrustMode
+  kind: func
+  description: ''
+  references:
+  - require.NoError
+  - assert.Equal
+  calls:
+  - assert.Equal
+  - require.NoError

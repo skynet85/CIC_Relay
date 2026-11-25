@@ -87,7 +87,13 @@ func registerNativeComponents(ctx context.Context, svc cabinet.Cabinet, pkiAsset
 	if err != nil {
 		return fmt.Errorf("failed to create cic.source.assert module descriptor: %w", err)
 	}
-	assertModule.NativeImpl = cabinet.NativeFunctions{"assert": schemacompile.NewAssertSourceFunc(certVerify)}
+	// Prod has no stub mode: an artifact is never asserted, built or signed without a source assertion.
+	stubAllowed := pkiAssets.TrustMode != TrustModeProd
+	assertFn := schemacompile.NewAssertSourceFunc(certVerify)
+	if !stubAllowed {
+		assertFn = schemacompile.NewStrictAssertSourceFunc(certVerify)
+	}
+	assertModule.NativeImpl = cabinet.NativeFunctions{"assert": assertFn}
 	if err := svc.PutModule(assertModule); err != nil {
 		return fmt.Errorf("failed to register cic.source.assert module: %w", err)
 	}
@@ -98,7 +104,7 @@ func registerNativeComponents(ctx context.Context, svc cabinet.Cabinet, pkiAsset
 	if err != nil {
 		return fmt.Errorf("failed to create cic.schema.build module descriptor: %w", err)
 	}
-	buildModule.NativeImpl = cabinet.NativeFunctions{"build": schemacompile.BuildSchema}
+	buildModule.NativeImpl = cabinet.NativeFunctions{"build": schemacompile.NewBuildSchemaFunc(stubAllowed)}
 	if err := svc.PutModule(buildModule); err != nil {
 		return fmt.Errorf("failed to register cic.schema.build module: %w", err)
 	}
@@ -314,6 +320,9 @@ type PKIAssets struct {
 	CRLs             []*x509.RevocationList
 	CRLFreshness     *cabinet.CRLFreshness // set in prod: verification rejects a stale CRL
 	TrustStoreLoaded bool                  // true when at least one root CA was loaded
+	// TrustMode is the CIC_TRUST_MODE the assets were bootstrapped in (TrustModeDev or TrustModeProd);
+	// empty when they were built without bootstrapTrust (tests).
+	TrustMode string
 	// AllowUnsignedModules admits a module that has NO signature file. It is set only in dev mode, only by the
 	// explicit operator opt-in CIC_ALLOW_UNSIGNED_MODULES=1 (allowUnsignedModulesFromEnv), and never for a module
 	// whose signature is present but unreadable, malformed, unverifiable or invalid: those are always refused.
