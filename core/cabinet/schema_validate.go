@@ -3,7 +3,11 @@ package cabinet
 import "fmt"
 
 // ValidateSchema checks whether data carries a "$schema" key matching one of the accepted schema IDs.
-// If accepts is empty, all data passes validation. This is the exported counterpart of validateInputSchema
+// If accepts is empty, all data passes validation.
+//
+// This is an identity check, not structural validation: it checks the label the data declares,
+// not that the data conforms to the schema's fields. Schemas registered in the Cabinet are not
+// machine-readable field rules today, so nothing validates content against them. This is the exported counterpart of validateInputSchema
 // and can be used independently without a ModuleDescriptor (e.g. for self-validation).
 func ValidateSchema(accepts []string, data interface{}) error {
 	if len(accepts) == 0 {

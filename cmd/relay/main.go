@@ -444,10 +444,10 @@ func (s *relayServer) setHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(resp)
 }
 
-// validateConfig validates the loaded configuration using the cabinet schema engine.
-// This is "dogfooding": the relay validates its own config with the same mechanism
-// it uses to validate workflow inputs (cabinet.ValidateSchema / $schema key check).
-// Range constraints are also enforced directly before the schema ID check.
+// validateConfig validates the loaded configuration. The range checks below are the real
+// validation. The final cabinet.ValidateSchema call only runs the config through the same
+// "$schema" label check that workflow inputs get; since the label is set here, it always passes
+// and validates no content (see ValidateSchema).
 func validateConfig(cfg *config) error {
 	if cfg.MaxJSONInputSize < 1 {
 		return fmt.Errorf("max_json_input_size must be >= 1, got %d", cfg.MaxJSONInputSize)

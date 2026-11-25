@@ -53,7 +53,7 @@ Ha ilyen helyet találsz: **ne kösd be, ne "javítsd ki"** amíg az előfeltét
 
 | Komponens | Állapot |
 |---|---|
-| `Setx` schema validáció | Kész — `validateInputSchema` minden lépésnél fut |
+| `Setx` schema-ellenőrzés | Kész, de csak címke: `validateInputSchema` a `$schema` ID-t nézi, a tartalmat nem |
 | `graph.go` ExecutionGraph | Kész — lineáris, névvel ellátott kimenet-kulcsok |
 | Bootstrap audit log | Kész — `outcome: "skipped"`, `reason: "trust ecosystem not bootstrapped"` |
 | `ProofTrace` típus + chain_hash | Kész — per-step hash, chain_hash, recorder wiring |

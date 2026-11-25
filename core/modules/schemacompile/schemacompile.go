@@ -48,23 +48,32 @@ type cicSchemasArtifact struct {
 //   - parses and verifies the PEM certificate in metadata.createdBy.certificate via verify
 func NewAssertSourceFunc(verify CertVerifyFunc) func(context.Context, interface{}) (interface{}, error) {
 	return func(_ context.Context, input interface{}) (interface{}, error) {
-		return assertSourceImpl(input, verify)
+		return assertSourceImpl(input, verify, false)
+	}
+}
+
+// NewStrictAssertSourceFunc is NewAssertSourceFunc without stub mode: an input without
+// source_assertion is rejected instead of being passed through as asserted. The relay uses it
+// in prod trust mode, where an artifact must never be signed on the strength of no assertion.
+func NewStrictAssertSourceFunc(verify CertVerifyFunc) func(context.Context, interface{}) (interface{}, error) {
+	return func(_ context.Context, input interface{}) (interface{}, error) {
+		return assertSourceImpl(input, verify, true)
 	}
 }
 
 // AssertSource is the legacy no-verifier entry point (stub mode, Layer 1 not yet wired).
 // Use NewAssertSourceFunc to inject a real PKI verifier.
 func AssertSource(_ context.Context, input interface{}) (interface{}, error) {
-	return assertSourceImpl(input, nil)
+	return assertSourceImpl(input, nil, false)
 }
 
 // assertSourceImpl is cic.source.assert. Without source_assertion it passes the input through, marked
-// asserted (stub mode). Otherwise it parses the assertion YAML and rejects it unless metadata carries name,
+// asserted with assertion "none" (stub mode), or, when strict, rejects it. Otherwise it parses the assertion YAML and rejects it unless metadata carries name,
 // version, checksum, sign and createdBy.certificate, metadata.checksum equals the SHA-256 of the canonical
 // JSON of spec (when spec is present), the certificate passes verify (when verify is non-nil), and the
 // requested schema and version (when given) match the asserted ones. The result carries the asserted
 // identity, metadata, spec and raw YAML, plus the provenance fields of the input.
-func assertSourceImpl(input interface{}, verify CertVerifyFunc) (interface{}, error) {
+func assertSourceImpl(input interface{}, verify CertVerifyFunc, strict bool) (interface{}, error) {
 	m, ok := input.(map[string]interface{})
 	if !ok {
 		return nil, fmt.Errorf("cic.source.assert: expected map, got %T", input)
@@ -72,12 +81,17 @@ func assertSourceImpl(input interface{}, verify CertVerifyFunc) (interface{}, er
 
 	assertionYAML, _ := m["source_assertion"].(string)
 	if assertionYAML == "" {
-		// No assertion provided — pass through in stub mode.
-		out := make(map[string]interface{}, len(m)+2)
+		if strict {
+			return nil, fmt.Errorf("cic.source.assert: source_assertion is required (stub mode is disabled in this trust mode)")
+		}
+		// No assertion provided — pass through in stub mode, marked so nothing downstream
+		// mistakes it for a verified source.
+		out := make(map[string]interface{}, len(m)+3)
 		for k, v := range m {
 			out[k] = v
 		}
 		out["asserted"] = true
+		out["assertion"] = AssertionNone
 		out["policy_version"] = "1.0"
 		return out, nil
 	}
@@ -186,11 +200,40 @@ func carryProvenance(dst, src map[string]interface{}) {
 	}
 }
 
+// AssertionNone is the value of the "assertion" output key of cic.source.assert when no
+// source_assertion was given (stub mode): asserted is true, but nothing was verified.
+const AssertionNone = "none"
+
+// Values of the "source_provenance" output key of cic.artifact.sign: what the source_ref and
+// source_tree_digest of the signed record describe.
+const (
+	// SourceProvenanceRepository: the repository the pipeline cloned and built.
+	SourceProvenanceRepository = "repository"
+	// SourceProvenanceRelay: the run carried no repository (for example a direct
+	// /v1/schema/compile call), so the fields describe the relay's own build, not the artifact's source.
+	SourceProvenanceRelay = "relay"
+)
+
 // BuildSchema is the native function for cic.schema.build@1.0.
 //
 // If the input contains a parsed artifact (from AssertSource), it returns it
-// as the artifact to be signed. Otherwise it generates a stub artifact for testing.
-func BuildSchema(_ context.Context, input interface{}) (interface{}, error) {
+// as the artifact to be signed. Otherwise it generates a stub artifact for testing,
+// marked with "stub": true.
+func BuildSchema(ctx context.Context, input interface{}) (interface{}, error) {
+	return buildSchemaImpl(ctx, input, true)
+}
+
+// NewBuildSchemaFunc returns cic.schema.build@1.0. With allowStub false (prod trust mode) an
+// input that carries no asserted artifact is rejected instead of being turned into a synthetic
+// stub artifact, so a stub can never reach the signing step.
+func NewBuildSchemaFunc(allowStub bool) func(context.Context, interface{}) (interface{}, error) {
+	return func(ctx context.Context, input interface{}) (interface{}, error) {
+		return buildSchemaImpl(ctx, input, allowStub)
+	}
+}
+
+// buildSchemaImpl is BuildSchema with the stub fallback switchable (allowStub).
+func buildSchemaImpl(_ context.Context, input interface{}, allowStub bool) (interface{}, error) {
 	m, ok := input.(map[string]interface{})
 	if !ok {
 		return nil, fmt.Errorf("cic.schema.build: expected map, got %T", input)
@@ -211,6 +254,9 @@ func BuildSchema(_ context.Context, input interface{}) (interface{}, error) {
 	}
 
 	// Stub mode: generate synthetic artifact.
+	if !allowStub {
+		return nil, fmt.Errorf("cic.schema.build: no asserted artifact to build and stub mode is disabled in this trust mode")
+	}
 	schema, _ := m["schema"].(string)
 	version, _ := m["version"].(string)
 	if schema == "" {
@@ -233,6 +279,7 @@ func BuildSchema(_ context.Context, input interface{}) (interface{}, error) {
 		"schema":       schema,
 		"version":      version,
 		"raw_artifact": rawArtifact,
+		"stub":         true,
 	}
 	carryProvenance(out, m)
 	return out, nil
@@ -295,6 +342,11 @@ func newSignArtifactResult(ctx context.Context, input interface{}, bctx merkle.B
 	// correctly describe the environment that performed the build.
 	sourceRef, _ := m["source_ref"].(string)
 	sourceTreeDigest, _ := m["source_tree_digest"].(string)
+	sourceProvenance := SourceProvenanceRepository
+	if sourceRef == "" && sourceTreeDigest == "" {
+		// No repository in the run: the record names the relay's build, and says so.
+		sourceProvenance = SourceProvenanceRelay
+	}
 	if sourceRef == "" {
 		sourceRef = bctx.SourceRef
 	}
@@ -350,7 +402,9 @@ func newSignArtifactResult(ctx context.Context, input interface{}, bctx merkle.B
 
 	// source_ref / source_tree_digest are echoed so a caller can see which
 	// revision the build_hash actually attests, without re-deriving it.
-	return map[string]interface{}{
+	// source_provenance says what those fields describe; stub is carried so a signed stub
+	// artifact (dev mode only) can never pass for a built one.
+	out := map[string]interface{}{
 		"artifact":           rawArtifact,
 		"build_hash":         buildHash,
 		"cic_sign":           cicSign,
@@ -358,5 +412,10 @@ func newSignArtifactResult(ctx context.Context, input interface{}, bctx merkle.B
 		"verification_root":  merkle.BuildVerificationRoot(manifest),
 		"source_ref":         sourceRef,
 		"source_tree_digest": sourceTreeDigest,
-	}, nil
+		"source_provenance":  sourceProvenance,
+	}
+	if stub, _ := m["stub"].(bool); stub {
+		out["stub"] = true
+	}
+	return out, nil
 }

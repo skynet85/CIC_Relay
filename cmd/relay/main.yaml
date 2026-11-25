@@ -180,11 +180,10 @@ objects:
   - uuid.New
 - name: validateConfig
   kind: func
-  description: 'validateConfig validates the loaded configuration using the cabinet
-    schema engine. This is "dogfooding": the relay validates its own config with the
-    same mechanism it uses to validate workflow inputs (cabinet.ValidateSchema / $schema
-    key check). Range constraints are also enforced directly before the schema ID
-    check.'
+  description: validateConfig validates the loaded configuration. The range checks
+    below are the real validation. The final cabinet.ValidateSchema call only runs
+    the config through the same "$schema" label check that workflow inputs get; since
+    the label is set here, it always passes and validates no content (see ValidateSchema).
   references:
   - cabinet.ValidateSchema
   calls:

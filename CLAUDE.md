@@ -57,7 +57,7 @@ Scaffold nem hiba. A scaffold-elemek szándékosak és előfeltételhez kötött
 
 ## Implemented — ami tényleg fut
 
-- `Setx` schema validáció: `validateInputSchema` aktívan fut minden lépésnél
+- `Setx` schema-ellenőrzés: `validateInputSchema` minden lépésnél fut, de csak a bemenet `$schema` címkéjét veti össze a modul `accepts` listájával; a tartalmat séma ellen semmi nem validálja
 - `ExecutionGraph`: lineáris, névvel ellátott kimenet-kulcsokkal, visszafelé kompatibilis
 - `ProofTrace`: per-step hash, chain_hash, recorder wiring
 - `core/cabinet` WASM runtime: wazero, LRU cache, singleflight, timeout

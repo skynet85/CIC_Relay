@@ -43,6 +43,14 @@ objects:
     verify'
   references: []
   calls: []
+- name: NewStrictAssertSourceFunc
+  kind: func
+  description: 'NewStrictAssertSourceFunc is NewAssertSourceFunc without stub mode:
+    an input without source_assertion is rejected instead of being passed through
+    as asserted. The relay uses it in prod trust mode, where an artifact must never
+    be signed on the strength of no assertion.'
+  references: []
+  calls: []
 - name: AssertSource
   kind: func
   description: AssertSource is the legacy no-verifier entry point (stub mode, Layer
@@ -52,13 +60,14 @@ objects:
 - name: assertSourceImpl
   kind: func
   description: assertSourceImpl is cic.source.assert. Without source_assertion it
-    passes the input through, marked asserted (stub mode). Otherwise it parses the
-    assertion YAML and rejects it unless metadata carries name, version, checksum,
-    sign and createdBy.certificate, metadata.checksum equals the SHA-256 of the canonical
-    JSON of spec (when spec is present), the certificate passes verify (when verify
-    is non-nil), and the requested schema and version (when given) match the asserted
-    ones. The result carries the asserted identity, metadata, spec and raw YAML, plus
-    the provenance fields of the input.
+    passes the input through, marked asserted with assertion "none" (stub mode), or,
+    when strict, rejects it. Otherwise it parses the assertion YAML and rejects it
+    unless metadata carries name, version, checksum, sign and createdBy.certificate,
+    metadata.checksum equals the SHA-256 of the canonical JSON of spec (when spec
+    is present), the certificate passes verify (when verify is non-nil), and the requested
+    schema and version (when given) match the asserted ones. The result carries the
+    asserted identity, metadata, spec and raw YAML, plus the provenance fields of
+    the input.
   references:
   - yaml.Unmarshal
   - canonicaljson.ToJSON
@@ -74,9 +83,23 @@ objects:
   calls: []
 - name: BuildSchema
   kind: func
-  description: BuildSchema is the native function for cic.schema.build@1.0. If the
+  description: 'BuildSchema is the native function for cic.schema.build@1.0. If the
     input contains a parsed artifact (from AssertSource), it returns it as the artifact
-    to be signed. Otherwise it generates a stub artifact for testing.
+    to be signed. Otherwise it generates a stub artifact for testing, marked with
+    "stub": true.'
+  references: []
+  calls: []
+- name: NewBuildSchemaFunc
+  kind: func
+  description: NewBuildSchemaFunc returns cic.schema.build@1.0. With allowStub false
+    (prod trust mode) an input that carries no asserted artifact is rejected instead
+    of being turned into a synthetic stub artifact, so a stub can never reach the
+    signing step.
+  references: []
+  calls: []
+- name: buildSchemaImpl
+  kind: func
+  description: buildSchemaImpl is BuildSchema with the stub fallback switchable (allowStub).
   references: []
   calls:
   - ValidateSchemaRef
@@ -131,4 +154,21 @@ objects:
     own build-time constants. The observable effect was that build_hash attested WHAT
     was compiled but not WHERE it came from: two different commits of the same repository
     produced a bit-identical build_hash whenever the compiled artifact was unchanged.'
+  references: []
+- name: AssertionNone
+  kind: const
+  description: 'AssertionNone is the value of the "assertion" output key of cic.source.assert
+    when no source_assertion was given (stub mode): asserted is true, but nothing
+    was verified.'
+  references: []
+- name: SourceProvenanceRepository
+  kind: const
+  description: 'SourceProvenanceRepository: the repository the pipeline cloned and
+    built.'
+  references: []
+- name: SourceProvenanceRelay
+  kind: const
+  description: 'SourceProvenanceRelay: the run carried no repository (for example
+    a direct /v1/schema/compile call), so the fields describe the relay''s own build,
+    not the artifact''s source.'
   references: []
