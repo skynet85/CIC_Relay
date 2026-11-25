@@ -22,6 +22,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"centralrelay/pkg/merkle"
@@ -69,6 +70,65 @@ type PipelineConfig struct {
 
 	// Runner is the command executor. Defaults to OSCommandRunner if nil.
 	Runner CommandRunner
+
+	// RestrictOverrides makes BuildDir and BuilderContainer operator-only: a request whose
+	// build_dir or builder_container differs from the configured value is refused. Without it a
+	// caller can point the relay at any directory (which start deletes) and any container on the
+	// Docker host. The relay sets it; the zero value keeps the permissive behaviour for tests.
+	RestrictOverrides bool
+}
+
+// safeArg matches a value that is passed to git or make as a single argument: it may not start
+// with "-" (it would be read as an option) and is limited to characters a ref, target or schema
+// name needs.
+var safeArg = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9_./+@-]*$`)
+
+// checkArg rejects a request value that git or make could read as an option, or that carries
+// characters no ref, target or schema name needs. field names the input key in the error.
+func checkArg(module, field, v string) error {
+	if !safeArg.MatchString(v) || strings.Contains(v, "..") {
+		return fmt.Errorf("%s: %s %q is not allowed (letters, digits and _ . / + @ - only, not starting with - and without ..)", module, field, v)
+	}
+	return nil
+}
+
+// checkRepoURL accepts https://, ssh://, git:// and file:// URLs and scp-style user@host:path,
+// and rejects anything git could read as an option.
+func checkRepoURL(module, u string) error {
+	if strings.HasPrefix(u, "-") {
+		return fmt.Errorf("%s: repo_url %q is not allowed (starts with -)", module, u)
+	}
+	for _, scheme := range []string{"https://", "ssh://", "git://", "file://"} {
+		if strings.HasPrefix(u, scheme) {
+			return nil
+		}
+	}
+	if at, colon := strings.Index(u, "@"), strings.Index(u, ":"); at > 0 && colon > at && !strings.Contains(u[:colon], "/") {
+		return nil
+	}
+	return fmt.Errorf("%s: repo_url %q is not allowed (use https://, ssh://, git://, file:// or user@host:path)", module, u)
+}
+
+// checkBuildDir refuses a build directory that start must not delete: relative paths and the
+// filesystem root.
+func checkBuildDir(module, dir string) error {
+	if !filepath.IsAbs(dir) || filepath.Clean(dir) == string(filepath.Separator) {
+		return fmt.Errorf("%s: build_dir %q must be an absolute path other than /", module, dir)
+	}
+	return nil
+}
+
+// resolveOverride returns the request value of an operator setting (build_dir or
+// builder_container) or the configured one. Under RestrictOverrides a request value that differs
+// from the configured one is refused.
+func (c *PipelineConfig) resolveOverride(module, field, requested, configured string) (string, error) {
+	if requested == "" || requested == configured {
+		return configured, nil
+	}
+	if c.RestrictOverrides {
+		return "", fmt.Errorf("%s: %s is set by the operator and cannot be overridden per request", module, field)
+	}
+	return requested, nil
 }
 
 // runner returns the configured CommandRunner, or an OSCommandRunner when none is set.
@@ -105,17 +165,40 @@ func (c *PipelineConfig) NewStartFunc() func(context.Context, interface{}) (inte
 		if branch == "" && commit == "" {
 			return nil, fmt.Errorf("cic.pipeline.start: branch or commit is required")
 		}
+		if err := checkRepoURL("cic.pipeline.start", repoURL); err != nil {
+			return nil, err
+		}
+		if branch != "" {
+			if err := checkArg("cic.pipeline.start", "branch", branch); err != nil {
+				return nil, err
+			}
+		}
+		if commit != "" {
+			if err := checkArg("cic.pipeline.start", "commit", commit); err != nil {
+				return nil, err
+			}
+		}
 		// schema/version are required by the CIC-Schemas pipeline, which reads the
 		// released artifact from source/<schema>.yaml. A generic repo CI run has no
 		// such concept, so they are carried when present and not demanded here; the
 		// steps that actually need them validate on their own.
 
-		buildDir := c.BuildDir
-		if override, _ := m["build_dir"].(string); override != "" {
-			buildDir = override
+		requestedDir, _ := m["build_dir"].(string)
+		buildDir, err := c.resolveOverride("cic.pipeline.start", "build_dir", requestedDir, c.BuildDir)
+		if err != nil {
+			return nil, err
 		}
 		if buildDir == "" {
 			return nil, fmt.Errorf("cic.pipeline.start: build_dir is required (set in config or request)")
+		}
+		if err := checkBuildDir("cic.pipeline.start", buildDir); err != nil {
+			return nil, err
+		}
+		// Every request value is checked before the first side effect (the build dir is deleted below).
+		requestedContainer, _ := m["builder_container"].(string)
+		builderContainer, err := c.resolveOverride("cic.pipeline.start", "builder_container", requestedContainer, c.BuilderContainer)
+		if err != nil {
+			return nil, err
 		}
 
 		r := c.runner()
@@ -132,7 +215,7 @@ func (c *PipelineConfig) NewStartFunc() func(context.Context, interface{}) (inte
 		// given we take a full clone and check it out; without it the original
 		// shallow branch clone is kept, since it is markedly cheaper.
 		if commit != "" {
-			out, code, err := r.Run(ctx, "", "git", "clone", repoURL, buildDir)
+			out, code, err := r.Run(ctx, "", "git", "clone", "--", repoURL, buildDir)
 			if err != nil {
 				return nil, fmt.Errorf("cic.pipeline.start: git clone: %w", err)
 			}
@@ -147,8 +230,8 @@ func (c *PipelineConfig) NewStartFunc() func(context.Context, interface{}) (inte
 				return nil, fmt.Errorf("cic.pipeline.start: git checkout %s exit %d: %s", commit, code, strings.TrimSpace(out))
 			}
 		} else {
-			// git clone --branch <branch> --depth 1 <url> <dir>
-			out, code, err := r.Run(ctx, "", "git", "clone", "--branch", branch, "--depth", "1", repoURL, buildDir)
+			// git clone --branch <branch> --depth 1 -- <url> <dir>
+			out, code, err := r.Run(ctx, "", "git", "clone", "--branch", branch, "--depth", "1", "--", repoURL, buildDir)
 			if err != nil {
 				return nil, fmt.Errorf("cic.pipeline.start: git clone: %w", err)
 			}
@@ -174,10 +257,6 @@ func (c *PipelineConfig) NewStartFunc() func(context.Context, interface{}) (inte
 		}
 
 		// Builder image digest via docker inspect.
-		builderContainer := c.BuilderContainer
-		if override, _ := m["builder_container"].(string); override != "" {
-			builderContainer = override
-		}
 		builderImageDigest := ""
 		if builderContainer != "" {
 			imgDigest, code2, err2 := r.Run(ctx, "", "docker", "inspect",
@@ -258,9 +337,10 @@ func (c *PipelineConfig) NewRepoBuildFunc() func(context.Context, interface{}) (
 		if artifactOutput == "" {
 			return nil, fmt.Errorf("cic.repo.build: artifact_output is required")
 		}
-		buildDir, _ := m["build_dir"].(string)
-		if buildDir == "" {
-			buildDir = c.BuildDir
+		requestedDir, _ := m["build_dir"].(string)
+		buildDir, err := c.resolveOverride("cic.repo.build", "build_dir", requestedDir, c.BuildDir)
+		if err != nil {
+			return nil, err
 		}
 		if buildDir == "" {
 			return nil, fmt.Errorf("cic.repo.build: build_dir is required")
@@ -316,12 +396,16 @@ func (c *PipelineConfig) runMakeStep(ctx context.Context, input interface{}, mak
 		return nil, fmt.Errorf("%s: expected map, got %T", moduleName, input)
 	}
 
-	builderContainer, _ := m["builder_container"].(string)
-	if builderContainer == "" {
-		builderContainer = c.BuilderContainer
+	requestedContainer, _ := m["builder_container"].(string)
+	builderContainer, err := c.resolveOverride(moduleName, "builder_container", requestedContainer, c.BuilderContainer)
+	if err != nil {
+		return nil, err
 	}
 	if builderContainer == "" {
 		return nil, fmt.Errorf("%s: builder_container is required", moduleName)
+	}
+	if err := checkArg(moduleName, "make_target", makeTarget); err != nil {
+		return nil, err
 	}
 
 	r := c.runner()
@@ -368,9 +452,10 @@ func (c *PipelineConfig) NewReleaseFunc() func(context.Context, interface{}) (in
 			return nil, fmt.Errorf("cic.pipeline.release: expected map, got %T", input)
 		}
 
-		builderContainer, _ := m["builder_container"].(string)
-		if builderContainer == "" {
-			builderContainer = c.BuilderContainer
+		requestedContainer, _ := m["builder_container"].(string)
+		builderContainer, err := c.resolveOverride("cic.pipeline.release", "builder_container", requestedContainer, c.BuilderContainer)
+		if err != nil {
+			return nil, err
 		}
 		if builderContainer == "" {
 			return nil, fmt.Errorf("cic.pipeline.release: builder_container is required")
@@ -378,9 +463,10 @@ func (c *PipelineConfig) NewReleaseFunc() func(context.Context, interface{}) (in
 
 		schema, _ := m["schema"].(string)
 		version, _ := m["version"].(string)
-		buildDir, _ := m["build_dir"].(string)
-		if buildDir == "" {
-			buildDir = c.BuildDir
+		requestedDir, _ := m["build_dir"].(string)
+		buildDir, err := c.resolveOverride("cic.pipeline.release", "build_dir", requestedDir, c.BuildDir)
+		if err != nil {
+			return nil, err
 		}
 
 		if schema == "" {
@@ -391,6 +477,13 @@ func (c *PipelineConfig) NewReleaseFunc() func(context.Context, interface{}) (in
 		}
 		if buildDir == "" {
 			return nil, fmt.Errorf("cic.pipeline.release: build_dir is required")
+		}
+		// schema names a file under build_dir and version becomes a make variable.
+		if err := checkArg("cic.pipeline.release", "schema", schema); err != nil {
+			return nil, err
+		}
+		if err := checkArg("cic.pipeline.release", "version", version); err != nil {
+			return nil, err
 		}
 
 		// Strip leading 'v' for the VERSION parameter (make release expects semver without 'v').

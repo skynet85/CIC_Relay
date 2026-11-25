@@ -268,6 +268,13 @@ objects:
   - logrus.Logger.Info
   - logrus.Logger.WithField
   - logrus.Logger.WithFields
+- name: pipelineOverridesAllowed
+  kind: func
+  description: 'pipelineOverridesAllowed reports whether pipeline requests may override
+    the operator''s build directory and builder container: only in dev trust mode
+    with CIC_PIPELINE_ALLOW_OVERRIDES set to exactly "1". Prod ignores the variable.'
+  references: []
+  calls: []
 - name: moduleLoadMu
   kind: var
   description: moduleLoadMu serialises loadModule (see there).
@@ -277,4 +284,9 @@ objects:
   description: 'afterCapabilityPublished is a test seam: called inside loadModule
     after the capability grant was published and before the artifact is stored, i.e.
     at the one point where an interleaving could hurt. Always nil in the relay.'
+  references: []
+- name: pipelineOverridesEnv
+  kind: const
+  description: pipelineOverridesEnv lets a dev relay accept per-request build_dir
+    / builder_container values.
   references: []

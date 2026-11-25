@@ -40,6 +40,34 @@ objects:
   references: []
   calls:
   - CombinedOutput
+- name: checkArg
+  kind: func
+  description: checkArg rejects a request value that git or make could read as an
+    option, or that carries characters no ref, target or schema name needs. field
+    names the input key in the error.
+  references: []
+  calls:
+  - MatchString
+- name: checkRepoURL
+  kind: func
+  description: checkRepoURL accepts https://, ssh://, git:// and file:// URLs and
+    scp-style user@host:path, and rejects anything git could read as an option.
+  references: []
+  calls: []
+- name: checkBuildDir
+  kind: func
+  description: 'checkBuildDir refuses a build directory that start must not delete:
+    relative paths and the filesystem root.'
+  references: []
+  calls: []
+- name: resolveOverride
+  kind: method
+  receiver: PipelineConfig
+  description: resolveOverride returns the request value of an operator setting (build_dir
+    or builder_container) or the configured one. Under RestrictOverrides a request
+    value that differs from the configured one is refused.
+  references: []
+  calls: []
 - name: runner
   kind: method
   receiver: PipelineConfig
@@ -157,3 +185,9 @@ objects:
   description: sortedKeys returns the keys of m in sorted order.
   references: []
   calls: []
+- name: safeArg
+  kind: var
+  description: 'safeArg matches a value that is passed to git or make as a single
+    argument: it may not start with "-" (it would be read as an option) and is limited
+    to characters a ref, target or schema name needs.'
+  references: []
