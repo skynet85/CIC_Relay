@@ -10,7 +10,7 @@ Ez a fájl az AI-támogatott roadmap aktív állapota.
 
 | Milestone | State       | Megjegyzés |
 |-----------|-------------|------------|
-| M-Konfig  | **Done**    | Séma-vezérelt önvalidáció kész (M8.1 + M8.2) |
+| M-Konfig  | **Done**    | Konfig-önellenőrzés kész (M8.1 + M8.2): a tartományokat explicit ellenőrzések kényszerítik; a `$schema` lépés csak címke-egyezés, tartalmi séma-validáció nincs |
 | M0        | Done        | Tesztek refaktorálása — dinamikus checksum |
 | M1        | Done        | WASM kanonikus checksum, CAS tárolás |
 | M2        | Done        | ExecutionGraph, schema validáció, ProofTrace |
@@ -64,7 +64,11 @@ Ez a fájl az AI-támogatott roadmap aktív állapota.
 | `cicSign` / `cicSignedCA` mezők | **implemented** | M36 ✅ — CAFingerprint-alapú |
 | quorum döntési réteg | concept | nincs runtime megfelelő |
 | CICmeta protocol | concept | nincs élő bridge a Relay runtime-hoz |
-| `executor` port + `http-executor` (végrehajtó-obj) | **implemented** (bekötetlen) | `module.open` → executor pipeline; FFI runtime bridge |
+| `executor` port + `http-executor` (végrehajtó-obj) | **implemented** (bekötve az `ffi_cgo` buildben, p97) | az alap (CGO-mentes) build nem regisztrálja az `http@1.0`-t |
+| subprocess-izoláció (`SubprocessWorker`, `Coordinator`) | scaffold | semmi nem indítja; a WASM a relay folyamatában fut |
+| `NextHops` (gráf-routing) | concept | a `Setx` lineáris; a mezőt semmi nem olvassa |
+| drift / OIS-kapu / rollback / `VerifyChain` | **implemented** (könyvtár + demó) | csak a `tools/statechain-demo` hívja, a relay API nem |
+| tartalmi séma-validáció | concept | a sémák ma nem gépi mezőszabályok; csak `$schema` címke-egyezés fut |
 
 ---
 
@@ -184,6 +188,24 @@ A sprint 13 végén lezajlott egy átfogó teszt-minőségi sprint (2026-05-16):
 | p103 | feature-010 | ✅ Done   | **OIS-gate — intent-autorizáció (§8.4 primitív)**: a záró felvonás autorizáció-magja. Egy állapot-változtató **Intent** (nevezetesen **rollback** egy korábbi *verifikált* állapotra) csak **policy-engedéllyel** mehet át — az „OpenIntentSign" seam, a countersign-minta (tartalomfüggő autorizáció) deklaratív intentekre. `core/nexus/ois`: `Intent{Actor, Action, TargetRef, Reason}` (nem-titkos) + `Policy interface { Authorize(Intent) error }` (nil=engedélyezve, `*Denied`=elutasítva, nem-titkos okkal — a Relay „okossága" itt él, az applier semmit sem tud róla) + `AllowlistPolicy` (`NewAllowlistPolicy().Allow(action, actors...)` builder; intent engedélyezve iff az Actor allowlistán van az Actionre; üres actor/ref mindig elutasítva). Igazolva: **coverage 100%, gremlins efficacy 100% + 100% mutator coverage** (authorized, wrong/empty-actor, empty-ref, unknown-action, multi-actor, Denied) — **felvéve a CI mutation-listára**. go build/vet zöld. Doc: `features/feature-010/ois-gate.md`. **Nyitva marad**: rollback-orchesztráció (cél-commit állapot kinyerése + OIS-gate + a visszaállított desired aláírt rögzítése + `make demo`) — §8.4 záró szelet |
 | p104 | feature-010 | ✅ Done   | **Rollback-orchesztráció — a §8.4 záró szelet, a §8 bizalom-demó teljes**: `GitStateRecorder.Rollback(ctx, actor, targetRef, reason, policy)` összeköti a darabokat: **OIS-gate** (rollback `Intent` autorizálása a policy-vel) → a cél verifikált commit **deklarált állapotának kinyerése** (`expected.json`) → engedélyezés esetén a visszaállított state **új Vault-aláírt, parent-linkelt commitként** rögzítése, aminek a metája tanúsítja a rollbackot (`action`, `rollback_target/actor/reason`). Policy-elutasítás → `*ois.Denied` (a hívó megkülönbözteti a „nem jogosult"-at a rögzítési hibától); a fizikai re-apply (Terraform) scope-on kívül. A **`make demo` most a teljes §8.1–§8.4-et** mutatja élőben: intruder **denied** → `relay.operator` **authorized** → restored → `VerifyChain` megerősíti (a rollback maga is aláírt, tanúsított esemény). Igazolva: recorder Rollback-tesztek (authorized restore+verify, policy-denied, nil-policy, bad-target), **recorder coverage 86.4% > 85**, go build/vet zöld, demo élőben lefuttatva (eldobható OpenBao) zöld. Doc: `features/feature-010/ois-gate.md` (Rollback orchestration szekció). **A §8 bizalom-lánc kész**: record → sign (kulcs Vaultban) → verify → drift → **autorizált, bizonyított rollback** — Terraform-provisioning nélkül, ahogy megbeszéltük |
 | p105 | feature-008 | ✅ Done   | **Élő FFI trust-flow demó (`make demo-trustflow`) — a Rust-oldal is látványosan**: a state-chain demó (tiszta Go) mellé a **capability/secret trust-flow** vizuális, egyparancsos bemutatója, ami **ténylegesen végigfuttatja a Rust-modulokat**. A Go relay egy kérést ad a Rust airlock-nak (`cic-ffi`), és a teljes trust-flow **a Rust belsejében** fut élő (eldobható) Vault ellen: `ModuleIdentity::generate` (per-request P-256 + CSR) → **Vault PKI countersign** → **mTLS cert-auth login** → `read_sealed` (KV) → `module.open` (ECIES) → **HTTP-aktuáció** a nyitott credentiallel; csak a `{status, body, scope, audit}` jön vissza, **a titok sosem lép ki**. `tools/trustflow-demo` (cgo, `ffi_cgo` + `!ffi_cgo` stub a default buildhez) + `scripts/trustflow-demo.sh` (throwaway OpenBao + PKI/cert-auth/KV provisioning, a `ffi-live-e2e.sh` mintájára) + `make demo-trustflow` (live staticlib build + go-builder + vault mount). Élőben lefuttatva: **zöld** — `status=200 body="pong" scope=[db.read]`, `audit decision=allow record_hash=…`, a credential `Bearer`-ként ér az endpointhoz, és a titok NEM crossol vissza. Opt-in, nem CI-gate; a `tools/trustflow-demo` coverage-skip-en. Doc: `features/feature-008/trustflow-demo.md`. **Két komplementer demó**: `make demo` (IaC bizalom-lánc, Go) + `make demo-trustflow` (capability trust-flow, Rust FFI) — együtt a teljes CIC-tézis |
+
+---
+
+## Funkcionális review (2026-11-25)
+
+Ígéret és megvalósítás összevetése; a javítások egymásra épülő PR-okban:
+
+| Pont | Eltérés | Javítás |
+|---|---|---|
+| 1 | A ProofTrace kulcs nélküli lánc, a verify csak újraszámolt | chain v2 (modul-checksum, timestamp, kimenet), aláírt chain hash, `authentic` a verify-ban |
+| 2 | Hibás futásról nem maradt nyom; bizonyíték alapból opcionális | `status: failed` trace rögzítése; prod: `CIC_EVIDENCE_REQUIRED` alapból `true` |
+| 3 | A séma-validáció csak címke-egyezés | dokumentálva; tartalmi validáció nyitott (séma-nyelv döntés kell) |
+| 4 | A compile assertion és build nélkül is aláírt | prod: stub út tiltva; dev: `assertion: none`, `stub: true`, `source_provenance` |
+| 5 | Pipeline: szűretlen argumentumok, közös build-könyvtár | argumentum-validáció, `--`, operátori könyvtár/konténer, könyvtáranként egy futás |
+| 6 | IaC-futás forrás-horgony nélkül | `SourceDigest = iac.SpecDigest(spec)`, `API.Set`-en át |
+| 7 | Bekötetlen kód, elcsúszott státuszok | scaffold-térkép, README, feature-list, roadmap-sorok frissítve |
+
+Nyitva marad: tartalmi séma-validáció, a subprocess-izoláció bekötése, a `NextHops`, a drift/OIS/rollback API-ra kötése, a #162 (WASM + manifest feletti aláírás), a `/set` útvonal pipeline-zára.
 
 ---
 
@@ -373,9 +395,9 @@ Ezekből lesz majd rendes issue-k, PR-sorrend és DoD.
 | M41 | `crypto.sign` capability | concept | Spec D+E; Vault Transit (M13 minta) |
 | M41.2 | Secret Envelope Design Spike | concept | Spec E2; A vs. B verzió eldöntése; v1-et nem blokkolja |
 | M42 | Egységes error model | concept | Spec G (hiba rész) |
-| M43 | `http.request` broker | concept | Spec F; M37-től független vonal |
+| M43 | `http.request` broker | **részben** | p83–p97: `http-executor` + `http.request` capability, élőben csak `ffi_cgo` buildben; Spec F még hiányzik |
 | M44 | Limits / budget | concept | Spec G (limit rész) |
-| M45 | Audit / ProofTrace integráció | concept | Spec G (audit rész); M17/M22/M32 bővítés |
+| M45 | Audit / ProofTrace integráció | **részben** | p89–p96: aláírt audit-lánc a ProofTrace-be; 2026-11-25: chain v2, aláírt trace, hibás futás rögzítése |
 | M45.5 | Echo reference provider | concept | cloud-független ABI/limit/audit bizonyítás OCI előtt |
 | M46 | OCI reference provider | concept | Spec H; `examples/providers/oci/`; M45.5 után |
 | M47 | Policy test matrix | concept | Spec-ek negatív tesztjei |

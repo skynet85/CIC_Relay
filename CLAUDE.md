@@ -50,6 +50,9 @@ Scaffold nem hiba. A scaffold-elemek szándékosak és előfeltételhez kötött
 | `pki_verify.go` bekötése | **scaffold** | CICRootCA → Intermediate CA → leaf cert bootstrap |
 | `UpstreamSource` | **scaffold** | relay federáció (v2) |
 | `LocalWorker` in-process | **scaffold** | 3-process isolation + Vault |
+| `SubprocessWorker` / `Coordinator` | **scaffold** | semmi nem indítja; a WASM a relay folyamatában fut |
+| `NextHops` gráf-routing | **concept** | a `Setx` lineáris, a mezőt semmi nem olvassa |
+| drift / OIS-kapu / rollback | **implemented** könyvtárként | csak a `tools/statechain-demo` hívja, a relay API nem |
 | quorum döntési réteg | **concept** | nincs runtime megfelelő |
 | CICmeta protocol | **concept** | nincs élő bridge a Relay runtime-hoz |
 
@@ -59,7 +62,7 @@ Scaffold nem hiba. A scaffold-elemek szándékosak és előfeltételhez kötött
 
 - `Setx` schema-ellenőrzés: `validateInputSchema` minden lépésnél fut, de csak a bemenet `$schema` címkéjét veti össze a modul `accepts` listájával; a tartalmat séma ellen semmi nem validálja
 - `ExecutionGraph`: lineáris, névvel ellátott kimenet-kulcsokkal, visszafelé kompatibilis
-- `ProofTrace`: per-step hash, chain_hash, recorder wiring
+- `ProofTrace`: per-step hash, chain v2 (modul-checksum, timestamp, kimenet bekötve), aláírt chain hash Vaulttal, a sikertelen futás is rögzül, recorder wiring
 - `core/cabinet` WASM runtime: wazero, LRU cache, singleflight, timeout
 - Bootstrap audit log: `outcome: "skipped"` + `reason: "trust ecosystem not bootstrapped"`
 
@@ -105,6 +108,8 @@ A rendszernek két koherens félrendszere van, de köztük egyes hidak még nem 
 ```
 concept/CICmeta protocol  ──✗──  core/cabinet runtime
 concept/quorum            ──✗──  bármely runtime component
+nexus/isolation           ──✗──  cmd/relay (a worker-mód létezik, indítója nincs)
+nexus/drift, ois          ──✗──  relay API (csak a statechain-demo hívja)
 pki_verify.go             ──✗──  CICRootCA chain (nincs bootstrapped)
 UpstreamSource            ──✗──  HTTP upstream (v2)
 ```
